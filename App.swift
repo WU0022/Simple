@@ -45,6 +45,7 @@ final class TabItem: NSObject, WKNavigationDelegate {
         webView.navigationDelegate = self
         webView.allowsBackForwardNavigationGestures = true
         webView.scrollView.keyboardDismissMode = .onDrag
+        webView.scrollView.contentInsetAdjustmentBehavior = .automatic
         webView.backgroundColor = .systemBackground
         webView.isOpaque = true
     }
@@ -106,12 +107,12 @@ final class TabItem: NSObject, WKNavigationDelegate {
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
     ) {
-        guard let requestURL = navigationAction.request.url else {
+        guard let url = navigationAction.request.url else {
             decisionHandler(.cancel)
             return
         }
 
-        let scheme = requestURL.scheme?.lowercased() ?? ""
+        let scheme = url.scheme?.lowercased() ?? ""
 
         if ["http", "https", "about", "data", "blob"].contains(scheme) {
             if navigationAction.targetFrame == nil {
@@ -126,12 +127,12 @@ final class TabItem: NSObject, WKNavigationDelegate {
 
         decisionHandler(.cancel)
 
-        if scheme == "intent", let fallbackURL = fallbackURL(from: requestURL) {
+        if scheme == "intent", let fallbackURL = fallbackURL(from: url) {
             webView.load(URLRequest(url: fallbackURL))
             return
         }
 
-        UIApplication.shared.open(requestURL, options: [:], completionHandler: nil)
+        UIApplication.shared.open(url, options: [:], completionHandler: nil)
     }
 
     private func fallbackURL(from intentURL: URL) -> URL? {
@@ -141,18 +142,19 @@ final class TabItem: NSObject, WKNavigationDelegate {
             return nil
         }
 
-        let encodedValue = String(value[range.upperBound...]).components(separatedBy: ";").first ?? ""
-        let decodedValue = encodedValue.removingPercentEncoding ?? encodedValue
+        let content = String(value[range.upperBound...])
+        let encoded = content.components(separatedBy: ";").first ?? content
+        let decoded = encoded.removingPercentEncoding ?? encoded
 
-        return URL(string: decodedValue)
+        return URL(string: decoded)
     }
 }
 
 final class BrowserViewController: UIViewController, UITextFieldDelegate, TabItemDelegate, UIGestureRecognizerDelegate {
     private var tabs: [TabItem] = []
     private var activeTabIndex = 0
-    private var progressObservation: NSKeyValueObservation?
     private var isFullscreen = false
+    private var progressObservation: NSKeyValueObservation?
 
     private var activeTab: TabItem {
         tabs[activeTabIndex]
@@ -161,18 +163,17 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     private let webContainer = UIView()
     private let homeView = UIView()
     private let bottomPanel = UIView()
-    private let progressView = UIProgressView(progressViewStyle: .default)
-
     private let addressContainer = UIView()
     private let addressField = UITextField()
     private let refreshButton = UIButton(type: .system)
     private let clearButton = UIButton(type: .system)
+    private let progressView = UIProgressView(progressViewStyle: .default)
 
     private let navigationStack = UIStackView()
     private let backButton = UIButton(type: .system)
-    private let forwardButton = UIButton(type: .system)
     private let homeButton = UIButton(type: .system)
     private let tabsButton = UIButton(type: .system)
+    private let fullscreenButton = UIButton(type: .system)
     private let moreButton = UIButton(type: .system)
 
     private var bottomPanelBottomConstraint: NSLayoutConstraint?
@@ -222,32 +223,37 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         bottomPanel.translatesAutoresizingMaskIntoConstraints = false
         bottomPanel.backgroundColor = UIColor(
-            red: 246.0 / 255.0,
-            green: 246.0 / 255.0,
+            red: 247.0 / 255.0,
+            green: 247.0 / 255.0,
             blue: 248.0 / 255.0,
             alpha: 1
         )
 
         addressContainer.translatesAutoresizingMaskIntoConstraints = false
         addressContainer.backgroundColor = .white
-        addressContainer.layer.cornerRadius = 23
+        addressContainer.layer.cornerRadius = 21
         addressContainer.layer.borderWidth = 0.5
         addressContainer.layer.borderColor = UIColor(
-            red: 219.0 / 255.0,
-            green: 219.0 / 255.0,
-            blue: 224.0 / 255.0,
+            red: 222.0 / 255.0,
+            green: 222.0 / 255.0,
+            blue: 225.0 / 255.0,
             alpha: 1
         ).cgColor
         addressContainer.layer.shadowColor = UIColor.black.cgColor
-        addressContainer.layer.shadowOpacity = 0.045
-        addressContainer.layer.shadowRadius = 10
-        addressContainer.layer.shadowOffset = CGSize(width: 0, height: 3)
+        addressContainer.layer.shadowOpacity = 0.025
+        addressContainer.layer.shadowRadius = 8
+        addressContainer.layer.shadowOffset = CGSize(width: 0, height: 2)
 
         addressField.translatesAutoresizingMaskIntoConstraints = false
         addressField.delegate = self
         addressField.placeholder = "搜索或输入网址"
-        addressField.font = .systemFont(ofSize: 17, weight: .regular)
-        addressField.textColor = .label
+        addressField.font = .systemFont(ofSize: 16, weight: .regular)
+        addressField.textColor = UIColor(
+            red: 67.0 / 255.0,
+            green: 67.0 / 255.0,
+            blue: 70.0 / 255.0,
+            alpha: 1
+        )
         addressField.textAlignment = .center
         addressField.keyboardType = .webSearch
         addressField.returnKeyType = .go
@@ -259,15 +265,15 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         refreshButton.translatesAutoresizingMaskIntoConstraints = false
         refreshButton.tintColor = UIColor(
-            red: 82.0 / 255.0,
-            green: 82.0 / 255.0,
-            blue: 87.0 / 255.0,
+            red: 99.0 / 255.0,
+            green: 99.0 / 255.0,
+            blue: 104.0 / 255.0,
             alpha: 1
         )
         refreshButton.setImage(
             UIImage(
                 systemName: "arrow.clockwise",
-                withConfiguration: UIImage.SymbolConfiguration(pointSize: 23, weight: .regular)
+                withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .regular)
             ),
             for: .normal
         )
@@ -275,15 +281,15 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         clearButton.translatesAutoresizingMaskIntoConstraints = false
         clearButton.tintColor = UIColor(
-            red: 96.0 / 255.0,
-            green: 96.0 / 255.0,
-            blue: 101.0 / 255.0,
+            red: 75.0 / 255.0,
+            green: 75.0 / 255.0,
+            blue: 79.0 / 255.0,
             alpha: 1
         )
         clearButton.setImage(
             UIImage(
-                systemName: "xmark.circle.fill",
-                withConfiguration: UIImage.SymbolConfiguration(pointSize: 24, weight: .medium)
+                systemName: "xmark",
+                withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .medium)
             ),
             for: .normal
         )
@@ -294,8 +300,8 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         progressView.translatesAutoresizingMaskIntoConstraints = false
         progressView.progressTintColor = .systemBlue
         progressView.trackTintColor = .clear
-        progressView.alpha = 0
         progressView.progress = 0
+        progressView.alpha = 0
 
         navigationStack.translatesAutoresizingMaskIntoConstraints = false
         navigationStack.axis = .horizontal
@@ -304,15 +310,15 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         navigationStack.spacing = 0
 
         configureToolbarButton(backButton, imageName: "chevron.backward", action: #selector(goBack))
-        configureToolbarButton(forwardButton, imageName: "chevron.forward", action: #selector(goForward))
-        configureToolbarButton(homeButton, imageName: "safari", action: #selector(goHome))
+        configureToolbarButton(homeButton, imageName: "tray", action: #selector(goHome))
         configureToolbarButton(tabsButton, imageName: "square.on.square", action: #selector(showTabsManager))
+        configureToolbarButton(fullscreenButton, imageName: "square.3.layers.3d", action: #selector(toggleFullscreen))
         configureToolbarButton(moreButton, imageName: "line.3.horizontal", action: #selector(showMoreMenu))
 
         navigationStack.addArrangedSubview(backButton)
-        navigationStack.addArrangedSubview(forwardButton)
         navigationStack.addArrangedSubview(homeButton)
         navigationStack.addArrangedSubview(tabsButton)
+        navigationStack.addArrangedSubview(fullscreenButton)
         navigationStack.addArrangedSubview(moreButton)
 
         addressContainer.addSubview(addressField)
@@ -355,36 +361,36 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             bottomPanel.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             bottomPanelBottomConstraint!,
 
-            addressContainer.topAnchor.constraint(equalTo: bottomPanel.topAnchor, constant: 8),
-            addressContainer.leadingAnchor.constraint(equalTo: bottomPanel.leadingAnchor, constant: 16),
-            addressContainer.trailingAnchor.constraint(equalTo: bottomPanel.trailingAnchor, constant: -16),
-            addressContainer.heightAnchor.constraint(equalToConstant: 46),
+            addressContainer.topAnchor.constraint(equalTo: bottomPanel.topAnchor, constant: 7),
+            addressContainer.leadingAnchor.constraint(equalTo: bottomPanel.leadingAnchor, constant: 18),
+            addressContainer.trailingAnchor.constraint(equalTo: bottomPanel.trailingAnchor, constant: -18),
+            addressContainer.heightAnchor.constraint(equalToConstant: 42),
 
-            refreshButton.trailingAnchor.constraint(equalTo: addressContainer.trailingAnchor, constant: -10),
+            refreshButton.trailingAnchor.constraint(equalTo: addressContainer.trailingAnchor, constant: -12),
             refreshButton.centerYAnchor.constraint(equalTo: addressContainer.centerYAnchor),
-            refreshButton.widthAnchor.constraint(equalToConstant: 30),
-            refreshButton.heightAnchor.constraint(equalToConstant: 30),
+            refreshButton.widthAnchor.constraint(equalToConstant: 28),
+            refreshButton.heightAnchor.constraint(equalToConstant: 28),
 
-            clearButton.trailingAnchor.constraint(equalTo: addressContainer.trailingAnchor, constant: -10),
+            clearButton.trailingAnchor.constraint(equalTo: addressContainer.trailingAnchor, constant: -12),
             clearButton.centerYAnchor.constraint(equalTo: addressContainer.centerYAnchor),
-            clearButton.widthAnchor.constraint(equalToConstant: 34),
-            clearButton.heightAnchor.constraint(equalToConstant: 34),
+            clearButton.widthAnchor.constraint(equalToConstant: 32),
+            clearButton.heightAnchor.constraint(equalToConstant: 32),
 
             addressField.leadingAnchor.constraint(equalTo: addressContainer.leadingAnchor, constant: 20),
-            addressField.trailingAnchor.constraint(equalTo: refreshButton.leadingAnchor, constant: -10),
+            addressField.trailingAnchor.constraint(equalTo: refreshButton.leadingAnchor, constant: -8),
             addressField.topAnchor.constraint(equalTo: addressContainer.topAnchor),
             addressField.bottomAnchor.constraint(equalTo: addressContainer.bottomAnchor),
 
-            navigationStack.topAnchor.constraint(equalTo: addressContainer.bottomAnchor, constant: 4),
-            navigationStack.leadingAnchor.constraint(equalTo: bottomPanel.leadingAnchor, constant: 10),
-            navigationStack.trailingAnchor.constraint(equalTo: bottomPanel.trailingAnchor, constant: -10),
-            navigationStack.bottomAnchor.constraint(equalTo: bottomPanel.safeAreaLayoutGuide.bottomAnchor, constant: -2),
-            navigationStack.heightAnchor.constraint(equalToConstant: 45),
+            navigationStack.topAnchor.constraint(equalTo: addressContainer.bottomAnchor, constant: 3),
+            navigationStack.leadingAnchor.constraint(equalTo: bottomPanel.leadingAnchor, constant: 18),
+            navigationStack.trailingAnchor.constraint(equalTo: bottomPanel.trailingAnchor, constant: -18),
+            navigationStack.bottomAnchor.constraint(equalTo: bottomPanel.safeAreaLayoutGuide.bottomAnchor, constant: -1),
+            navigationStack.heightAnchor.constraint(equalToConstant: 40),
 
             progressView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             progressView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             progressView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            progressView.heightAnchor.constraint(equalToConstant: 3)
+            progressView.heightAnchor.constraint(equalToConstant: 2)
         ])
 
         view.bringSubviewToFront(progressView)
@@ -394,14 +400,15 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         var configuration = UIButton.Configuration.plain()
         configuration.image = UIImage(
             systemName: imageName,
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 23, weight: .regular)
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .regular)
         )
         configuration.baseForegroundColor = UIColor(
-            red: 37.0 / 255.0,
-            green: 37.0 / 255.0,
-            blue: 40.0 / 255.0,
+            red: 48.0 / 255.0,
+            green: 48.0 / 255.0,
+            blue: 51.0 / 255.0,
             alpha: 1
         )
+        configuration.contentInsets = .zero
 
         button.configuration = configuration
         button.addTarget(self, action: action, for: .touchUpInside)
@@ -431,10 +438,11 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     }
 
     private func configureFullscreenExitGesture() {
-        let edgeGesture = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(handleBottomEdgePan(_:)))
-        edgeGesture.edges = .bottom
-        edgeGesture.delegate = self
-        view.addGestureRecognizer(edgeGesture)
+        let gesture = UILongPressGestureRecognizer(target: self, action: #selector(handleFullscreenExitGesture(_:)))
+        gesture.minimumPressDuration = 2
+        gesture.numberOfTouchesRequired = 2
+        gesture.cancelsTouchesInView = false
+        view.addGestureRecognizer(gesture)
     }
 
     private func createNewTab(loadURL url: URL?) {
@@ -487,9 +495,9 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             return
         }
 
-        let removedTab = tabs[index]
-        removedTab.webView.stopLoading()
-        removedTab.webView.removeFromSuperview()
+        let tab = tabs[index]
+        tab.webView.stopLoading()
+        tab.webView.removeFromSuperview()
         tabs.remove(at: index)
 
         if tabs.isEmpty {
@@ -508,11 +516,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         progressObservation = webView.observe(\.estimatedProgress, options: [.new]) { [weak self] observedWebView, _ in
             DispatchQueue.main.async {
-                guard let self else {
-                    return
-                }
-
-                guard observedWebView.isLoading else {
+                guard let self, observedWebView.isLoading else {
                     return
                 }
 
@@ -552,17 +556,23 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         let isHome = homeView.alpha > 0.5
 
         backButton.isEnabled = !isHome && activeTab.webView.canGoBack
-        forwardButton.isEnabled = !isHome && activeTab.webView.canGoForward
-        moreButton.isEnabled = !isHome || isFullscreen
+        fullscreenButton.isEnabled = !isHome
+        moreButton.isEnabled = !isHome
         refreshButton.isEnabled = !isHome
 
-        let imageName = activeTab.isLoading ? "xmark" : "arrow.clockwise"
+        let refreshImage = activeTab.isLoading ? "xmark" : "arrow.clockwise"
+
         refreshButton.setImage(
             UIImage(
-                systemName: imageName,
-                withConfiguration: UIImage.SymbolConfiguration(pointSize: 23, weight: .regular)
+                systemName: refreshImage,
+                withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .regular)
             ),
             for: .normal
+        )
+
+        fullscreenButton.configuration?.image = UIImage(
+            systemName: isFullscreen ? "arrow.down.right.and.arrow.up.left" : "square.3.layers.3d",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .regular)
         )
     }
 
@@ -587,26 +597,26 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         return components?.url
     }
 
-    private func setFullscreen(_ fullscreen: Bool) {
-        guard isFullscreen != fullscreen else {
+    private func setFullscreen(_ enabled: Bool) {
+        guard isFullscreen != enabled else {
             return
         }
 
         dismissKeyboard()
 
-        isFullscreen = fullscreen
-        bottomPanel.isHidden = fullscreen
-        progressView.isHidden = fullscreen
+        isFullscreen = enabled
+        bottomPanel.isHidden = enabled
+        progressView.isHidden = enabled
 
-        webTopSafeConstraint?.isActive = !fullscreen
-        webTopFullscreenConstraint?.isActive = fullscreen
-        webBottomPanelConstraint?.isActive = !fullscreen
-        webBottomFullscreenConstraint?.isActive = fullscreen
+        webTopSafeConstraint?.isActive = !enabled
+        webTopFullscreenConstraint?.isActive = enabled
+        webBottomPanelConstraint?.isActive = !enabled
+        webBottomFullscreenConstraint?.isActive = enabled
 
-        homeTopSafeConstraint?.isActive = !fullscreen
-        homeTopFullscreenConstraint?.isActive = fullscreen
-        homeBottomPanelConstraint?.isActive = !fullscreen
-        homeBottomFullscreenConstraint?.isActive = fullscreen
+        homeTopSafeConstraint?.isActive = !enabled
+        homeTopFullscreenConstraint?.isActive = enabled
+        homeBottomPanelConstraint?.isActive = !enabled
+        homeBottomFullscreenConstraint?.isActive = enabled
 
         UIView.animate(withDuration: 0.2) {
             self.view.layoutIfNeeded()
@@ -614,6 +624,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         setNeedsStatusBarAppearanceUpdate()
         setNeedsUpdateOfHomeIndicatorAutoHidden()
+        updateUIState()
     }
 
     private func showLoadError(_ error: Error) {
@@ -639,36 +650,30 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     }
 
     private func updateAddressEditingAppearance() {
-        let isEditing = addressField.isFirstResponder
+        let editing = addressField.isFirstResponder
         let hasText = !(addressField.text?.isEmpty ?? true)
 
-        clearButton.isHidden = !isEditing
-        refreshButton.isHidden = isEditing
+        refreshButton.isHidden = editing
+        clearButton.isHidden = !editing
 
-        UIView.animate(withDuration: 0.16) {
-            self.clearButton.alpha = isEditing ? 1 : 0
-            self.refreshButton.alpha = isEditing ? 0 : 1
+        UIView.animate(withDuration: 0.15) {
+            self.refreshButton.alpha = editing ? 0 : 1
+            self.clearButton.alpha = editing ? 1 : 0
         }
 
-        if isEditing {
-            addressField.trailingAnchor.constraint(equalTo: clearButton.leadingAnchor, constant: -10).isActive = true
-        }
-
-        if !hasText {
-            clearButton.tintColor = UIColor(
+        clearButton.tintColor = hasText
+            ? UIColor(
+                red: 75.0 / 255.0,
+                green: 75.0 / 255.0,
+                blue: 79.0 / 255.0,
+                alpha: 1
+            )
+            : UIColor(
                 red: 190.0 / 255.0,
                 green: 190.0 / 255.0,
-                blue: 195.0 / 255.0,
+                blue: 193.0 / 255.0,
                 alpha: 1
             )
-        } else {
-            clearButton.tintColor = UIColor(
-                red: 96.0 / 255.0,
-                green: 96.0 / 255.0,
-                blue: 101.0 / 255.0,
-                alpha: 1
-            )
-        }
     }
 
     func tabDidUpdate(_ tab: TabItem) {
@@ -711,12 +716,18 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         textField.textAlignment = .left
         updateAddressEditingAppearance()
+
+        DispatchQueue.main.async {
+            textField.selectAll(nil)
+        }
     }
 
     func textFieldDidEndEditing(_ textField: UITextField) {
         if let url = activeTab.url {
             textField.text = url.host ?? url.absoluteString
-        } else if textField.text?.isEmpty == true {
+        }
+
+        if activeTab.url == nil {
             textField.text = ""
         }
 
@@ -765,10 +776,9 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             return
         }
 
-        let keyboardFrameInView = view.convert(keyboardFrame, from: nil)
-        let overlap = max(0, view.bounds.maxY - keyboardFrameInView.minY)
-        let safeBottomInset = view.safeAreaInsets.bottom
-        let offset = max(0, overlap - safeBottomInset)
+        let frameInView = view.convert(keyboardFrame, from: nil)
+        let overlap = max(0, view.bounds.maxY - frameInView.minY)
+        let offset = max(0, overlap - view.safeAreaInsets.bottom)
 
         let curve = userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt ?? 7
         let options = UIView.AnimationOptions(rawValue: curve << 16)
@@ -796,8 +806,8 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         }
     }
 
-    @objc private func handleBottomEdgePan(_ gesture: UIScreenEdgePanGestureRecognizer) {
-        guard isFullscreen, gesture.state == .recognized || gesture.state == .ended else {
+    @objc private func handleFullscreenExitGesture(_ gesture: UILongPressGestureRecognizer) {
+        guard isFullscreen, gesture.state == .began else {
             return
         }
 
@@ -822,12 +832,12 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         activeTab.webView.goBack()
     }
 
-    @objc private func goForward() {
-        activeTab.webView.goForward()
-    }
-
     @objc private func goHome() {
         showHomeUI()
+    }
+
+    @objc private func toggleFullscreen() {
+        setFullscreen(!isFullscreen)
     }
 
     @objc private func showTabsManager() {
@@ -838,7 +848,10 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
                 return
             }
 
-            let manager = TabGridViewController(tabs: self.tabs, activeIndex: self.activeTabIndex)
+            let manager = TabGridViewController(
+                tabs: self.tabs,
+                activeIndex: self.activeTabIndex
+            )
 
             manager.onSelectTab = { [weak self] index in
                 self?.switchTab(to: index)
@@ -943,7 +956,7 @@ final class TabGridViewController: UIViewController, UICollectionViewDataSource,
         var configuration = UIButton.Configuration.filled()
         configuration.image = UIImage(
             systemName: "plus",
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .medium)
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 21, weight: .medium)
         )
         configuration.cornerStyle = .capsule
         configuration.baseBackgroundColor = .systemBlue
@@ -951,9 +964,9 @@ final class TabGridViewController: UIViewController, UICollectionViewDataSource,
 
         addButton.configuration = configuration
         addButton.layer.shadowColor = UIColor.black.cgColor
-        addButton.layer.shadowOpacity = 0.12
-        addButton.layer.shadowRadius = 10
-        addButton.layer.shadowOffset = CGSize(width: 0, height: 4)
+        addButton.layer.shadowOpacity = 0.1
+        addButton.layer.shadowRadius = 8
+        addButton.layer.shadowOffset = CGSize(width: 0, height: 3)
         addButton.addTarget(self, action: #selector(handleNewTab), for: .touchUpInside)
 
         view.addSubview(collectionView)
@@ -967,8 +980,8 @@ final class TabGridViewController: UIViewController, UICollectionViewDataSource,
 
             addButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             addButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
-            addButton.widthAnchor.constraint(equalToConstant: 54),
-            addButton.heightAnchor.constraint(equalToConstant: 54)
+            addButton.widthAnchor.constraint(equalToConstant: 50),
+            addButton.heightAnchor.constraint(equalToConstant: 50)
         ])
 
         navigationItem.rightBarButtonItem = UIBarButtonItem(
