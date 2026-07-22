@@ -1,4 +1,184 @@
 import UIKit
+import WebKit
+
+final class DomainSettingsViewController: UITableViewController {
+    private let domain: String
+    var onSettingsChanged: (() -> Void)?
+    var onExtractText: (() -> Void)?
+
+    init(domain: String, onSettingsChanged: (() -> Void)?) {
+        self.domain = domain
+        self.onSettingsChanged = onSettingsChanged
+        super.init(style: .insetGrouped)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        title = domain
+        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "完成", style: .done, target: self, action: #selector(handleDone))
+    }
+
+    @objc private func handleDone() {
+        dismiss(animated: true)
+    }
+
+    override func numberOfSections(in tableView: UITableView) -> Int {
+        return 2
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return section == 0 ? 4 : 1
+    }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
+
+        if indexPath.section == 0 {
+            let switchView = UISwitch()
+            switchView.tag = indexPath.row
+
+            if indexPath.row == 0 {
+                cell.textLabel?.text = "始终新标签打开网页"
+                switchView.isOn = DomainSettingsStore.shared.getBool(domain: domain, setting: "alwaysNewTab", defaultVal: false)
+                switchView.addTarget(self, action: #selector(handleSwitchChanged(_:)), for: .valueChanged)
+            } else if indexPath.row == 1 {
+                cell.textLabel?.text = "视频悬窗 (后续功能)"
+                switchView.isOn = DomainSettingsStore.shared.getBool(domain: domain, setting: "videoPopout", defaultVal: false)
+                switchView.isEnabled = false
+            } else if indexPath.row == 2 {
+                cell.textLabel?.text = "广告过滤 (后续功能)"
+                switchView.isOn = DomainSettingsStore.shared.getBool(domain: domain, setting: "adBlock", defaultVal: false)
+                switchView.isEnabled = false
+            } else if indexPath.row == 3 {
+                cell.textLabel?.text = "用户脚本"
+                switchView.isOn = DomainSettingsStore.shared.getBool(domain: domain, setting: "userScripts", defaultVal: true)
+                switchView.addTarget(self, action: #selector(handleSwitchChanged(_:)), for: .valueChanged)
+            }
+            cell.accessoryView = switchView
+        } else {
+            cell.textLabel?.text = "获取网页所有文字"
+            cell.textLabel?.textColor = .systemBlue
+            cell.textLabel?.textAlignment = .center
+        }
+
+        return cell
+    }
+
+    @objc private func handleSwitchChanged(_ sender: UISwitch) {
+        if sender.tag == 0 {
+            DomainSettingsStore.shared.setBool(domain: domain, setting: "alwaysNewTab", value: sender.isOn)
+        } else if sender.tag == 3 {
+            DomainSettingsStore.shared.setBool(domain: domain, setting: "userScripts", value: sender.isOn)
+            onSettingsChanged?()
+        }
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        if indexPath.section == 1 {
+            dismiss(animated: true) { [weak self] in
+                self?.onExtractText?()
+            }
+        }
+    }
+}
+
+final class WebsiteDataManagerViewController: UITableViewController {
+    private var records: [WKWebsiteDataRecord] = []
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        title = "管理网站数据"
+        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "DataRecordCell")
+
+        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "返回", style: .plain, target: self, action: #selector(handleDone))
+        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "移除", style: .plain, target: self, action: #selector(handleRemoveAll))
+        loadData()
+    }
+
+    private func loadData() {
+        let types = WKWebsiteDataStore.allWebsiteDataTypes()
+        WKWebsiteDataStore.default().fetchDataRecords(ofTypes: types) { [weak self] records in
+            DispatchQueue.main.async {
+                self?.records = records.sorted { $0.displayName < $1.displayName }
+                self?.tableView.reloadData()
+            }
+        }
+    }
+
+    @objc private func handleDone() {
+        dismiss(animated: true)
+    }
+
+    @objc private func handleRemoveAll() {
+        let alert = UIAlertController(title: "移除网站数据", message: "确定要移除所有未受锁定保护的网站数据吗？", preferredStyle: .actionSheet)
+        alert.addAction(UIAlertAction(title: "移除全部", style: .destructive) { [weak self] _ in
+            guard let self = self else { return }
+            let unlockedRecords = self.records.filter { !CookieLockStore.shared.isLocked(domain: $0.displayName) }
+            let types = WKWebsiteDataStore.allWebsiteDataTypes()
+            WKWebsiteDataStore.default().removeData(ofTypes: types, for: unlockedRecords) {
+                self.loadData()
+            }
+        })
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        present(alert, animated: true)
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return records.count
+    }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = UITableViewCell(style: .subtitle, reuseIdentifier: "DataRecordCell")
+        let record = records[indexPath.row]
+        let isLocked = CookieLockStore.shared.isLocked(domain: record.displayName)
+
+        var content = cell.defaultContentConfiguration()
+        content.text = record.displayName + (isLocked ? " 🔒" : "")
+
+        var dataTypesDescs: [String] = []
+        if record.dataTypes.contains(WKWebsiteDataTypeCookies) { dataTypesDescs.append("Cookies") }
+        if record.dataTypes.contains(WKWebsiteDataTypeDiskCache) || record.dataTypes.contains(WKWebsiteDataTypeMemoryCache) { dataTypesDescs.append("磁盘缓存") }
+        if record.dataTypes.contains(WKWebsiteDataTypeLocalStorage) { dataTypesDescs.append("本地存储") }
+
+        content.secondaryText = dataTypesDescs.joined(separator: ", ")
+        cell.contentConfiguration = content
+        return cell
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        let record = records[indexPath.row]
+        let isLocked = CookieLockStore.shared.isLocked(domain: record.displayName)
+
+        let alert = UIAlertController(title: record.displayName, message: nil, preferredStyle: .actionSheet)
+        alert.addAction(UIAlertAction(title: isLocked ? "🔓 解除 Cookie 锁定" : "🔒 锁定 Cookie 防误删", style: .default) { [weak self] _ in
+            CookieLockStore.shared.toggleLock(domain: record.displayName)
+            self?.tableView.reloadData()
+        })
+        alert.addAction(UIAlertAction(title: "🗑 删除此网站数据", style: .destructive) { [weak self] _ in
+            let types = WKWebsiteDataStore.allWebsiteDataTypes()
+            WKWebsiteDataStore.default().removeData(ofTypes: types, for: [record]) {
+                self?.loadData()
+            }
+        })
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        present(alert, animated: true)
+    }
+
+    override func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCell.EditingStyle, forRowAt indexPath: IndexPath) {
+        if editingStyle == .delete {
+            let record = records[indexPath.row]
+            let types = WKWebsiteDataStore.allWebsiteDataTypes()
+            WKWebsiteDataStore.default().removeData(ofTypes: types, for: [record]) { [weak self] in
+                self?.records.remove(at: indexPath.row)
+                tableView.deleteRows(at: [indexPath], with: .automatic)
+            }
+        }
+    }
+}
 
 final class CookieLockManagerViewController: UITableViewController {
     private var lockedDomains: [String] = []
