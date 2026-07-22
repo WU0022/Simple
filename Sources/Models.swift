@@ -9,6 +9,61 @@ struct UserScript: Codable {
     var isEnabled: Bool
 }
 
+final class CookieLockStore {
+    static let shared = CookieLockStore()
+    private let key = "locked_cookie_domains_v1"
+
+    private init() {}
+
+    func getLockedDomains() -> [String] {
+        return UserDefaults.standard.stringArray(forKey: key) ?? []
+    }
+
+    func isLocked(domain: String) -> Bool {
+        let locked = getLockedDomains()
+        let cleanDomain = domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        return locked.contains { lockedDomain in
+            cleanDomain == lockedDomain || cleanDomain.hasSuffix("." + lockedDomain)
+        }
+    }
+
+    func toggleLock(domain: String) {
+        var locked = getLockedDomains()
+        let cleanDomain = domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        if locked.contains(cleanDomain) {
+            locked.removeAll { $0 == cleanDomain }
+        } else {
+            locked.append(cleanDomain)
+        }
+        UserDefaults.standard.set(locked, forKey: key)
+    }
+}
+
+final class SearchHistoryStore {
+    static let shared = SearchHistoryStore()
+    private let key = "browser_search_history_v1"
+
+    private init() {}
+
+    func getHistory() -> [String] {
+        return UserDefaults.standard.stringArray(forKey: key) ?? []
+    }
+
+    func addHistory(_ query: String) {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var history = getHistory()
+        history.removeAll { $0 == trimmed }
+        history.insert(trimmed, at: 0)
+        if history.count > 100 { history = Array(history.prefix(100)) }
+        UserDefaults.standard.set(history, forKey: key)
+    }
+
+    func clearHistory() {
+        UserDefaults.standard.removeObject(forKey: key)
+    }
+}
+
 final class UserScriptStore {
     static let shared = UserScriptStore()
     private let key = "user_tampermonkey_scripts_v4"
@@ -30,30 +85,33 @@ final class UserScriptStore {
     }
 
     func parseMetadata(from code: String) -> (name: String, match: String) {
-        var name = "未命名脚本"
-        var match = "*"
+        var nameMap: [String: String] = [:]
+        var matches: [String] = []
 
         let lines = code.components(separatedBy: .newlines)
         for line in lines {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.contains("@name") {
-                let parts = trimmed.components(separatedBy: "@name")
-                if parts.count > 1 {
-                    name = parts[1].trimmingCharacters(in: .whitespaces)
-                }
-            } else if trimmed.contains("@match") {
-                let parts = trimmed.components(separatedBy: "@match")
-                if parts.count > 1 {
-                    match = parts[1].trimmingCharacters(in: .whitespaces)
-                }
-            } else if trimmed.contains("@include") {
-                let parts = trimmed.components(separatedBy: "@include")
-                if parts.count > 1 {
-                    match = parts[1].trimmingCharacters(in: .whitespaces)
-                }
+            guard trimmed.hasPrefix("//") else { continue }
+            let content = String(trimmed.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+            guard content.hasPrefix("@") else { continue }
+
+            let components = content.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+            guard components.count >= 2 else { continue }
+
+            let tag = components[0]
+            let val = components.dropFirst().joined(separator: " ")
+
+            if tag.hasPrefix("@name") {
+                nameMap[tag] = val
+            } else if tag == "@match" || tag == "@include" {
+                matches.append(val)
             }
         }
-        return (name, match)
+
+        let preferredName = nameMap["@name:zh-CN"] ?? nameMap["@name:zh"] ?? nameMap["@name:zh-TW"] ?? nameMap["@name"] ?? "未命名脚本"
+        let preferredMatch = matches.first ?? "*"
+
+        return (preferredName, preferredMatch)
     }
 
     func isScriptMatching(script: UserScript, urlString: String) -> Bool {
@@ -125,7 +183,7 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
 
         if action == "registerMenuCommand", let cmdId = body["id"] as? Int, let caption = body["caption"] as? String {
             let scriptId = (body["scriptId"] as? String) ?? ""
-            registeredCommands.removeAll { $0.cmdId == cmdId }
+            registeredCommands.removeAll { $0.cmdId == cmdId || ($0.scriptId == scriptId && $0.caption == caption) }
             registeredCommands.append(RegisteredMenuCommand(scriptId: scriptId, cmdId: cmdId, caption: caption))
         } else if action == "unregisterMenuCommand", let cmdId = body["id"] as? Int {
             registeredCommands.removeAll { $0.cmdId == cmdId }
