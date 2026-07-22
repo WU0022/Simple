@@ -1,6 +1,103 @@
 import UIKit
 import WebKit
 
+enum CleanOption: Hashable {
+    case cache
+    case cookies
+    case searchHistory
+    case scriptData
+}
+
+final class CleanDataSelectionViewController: UITableViewController {
+    private var selectedOptions: Set<CleanOption> = [.cache, .cookies]
+    var onConfirmClean: ((Set<CleanOption>) -> Void)?
+    var onOpenWebsiteDataManager: (() -> Void)?
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        title = "清除数据"
+        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "CleanCell")
+
+        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "取消", style: .plain, target: self, action: #selector(handleCancel))
+        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "确认清除", style: .done, target: self, action: #selector(handleConfirm))
+    }
+
+    @objc private func handleCancel() {
+        dismiss(animated: true)
+    }
+
+    @objc private func handleConfirm() {
+        let opts = selectedOptions
+        dismiss(animated: true) { [weak self] in
+            self?.onConfirmClean?(opts)
+        }
+    }
+
+    override func numberOfSections(in tableView: UITableView) -> Int {
+        return 2
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return section == 0 ? 4 : 1
+    }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
+
+        if indexPath.section == 0 {
+            let option: CleanOption
+            switch indexPath.row {
+            case 0:
+                cell.textLabel?.text = "网页缓存文件"
+                option = .cache
+            case 1:
+                cell.textLabel?.text = "Cookie 数据 (保留锁定保护项)"
+                option = .cookies
+            case 2:
+                cell.textLabel?.text = "搜索历史记录"
+                option = .searchHistory
+            default:
+                cell.textLabel?.text = "用户脚本缓存数据"
+                option = .scriptData
+            }
+
+            let isChecked = selectedOptions.contains(option)
+            cell.accessoryType = isChecked ? .checkmark : .none
+        } else {
+            cell.textLabel?.text = "管理网站数据"
+            cell.textLabel?.textColor = .systemBlue
+            cell.textLabel?.textAlignment = .center
+        }
+
+        return cell
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+
+        if indexPath.section == 0 {
+            let option: CleanOption
+            switch indexPath.row {
+            case 0: option = .cache
+            case 1: option = .cookies
+            case 2: option = .searchHistory
+            default: option = .scriptData
+            }
+
+            if selectedOptions.contains(option) {
+                selectedOptions.remove(option)
+            } else {
+                selectedOptions.insert(option)
+            }
+            tableView.reloadRows(at: [indexPath], with: .automatic)
+        } else {
+            dismiss(animated: true) { [weak self] in
+                self?.onOpenWebsiteDataManager?()
+            }
+        }
+    }
+}
+
 final class DomainSettingsViewController: UITableViewController {
     private let domain: String
     var onSettingsChanged: (() -> Void)?
@@ -29,7 +126,7 @@ final class DomainSettingsViewController: UITableViewController {
     }
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        return section == 0 ? 4 : 1
+        return section == 0 ? 3 : 1
     }
 
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
@@ -40,18 +137,14 @@ final class DomainSettingsViewController: UITableViewController {
             switchView.tag = indexPath.row
 
             if indexPath.row == 0 {
-                cell.textLabel?.text = "始终新标签打开网页"
-                switchView.isOn = DomainSettingsStore.shared.getBool(domain: domain, setting: "alwaysNewTab", defaultVal: false)
-                switchView.addTarget(self, action: #selector(handleSwitchChanged(_:)), for: .valueChanged)
-            } else if indexPath.row == 1 {
                 cell.textLabel?.text = "视频悬窗 (后续功能)"
                 switchView.isOn = DomainSettingsStore.shared.getBool(domain: domain, setting: "videoPopout", defaultVal: false)
                 switchView.isEnabled = false
-            } else if indexPath.row == 2 {
+            } else if indexPath.row == 1 {
                 cell.textLabel?.text = "广告过滤 (后续功能)"
                 switchView.isOn = DomainSettingsStore.shared.getBool(domain: domain, setting: "adBlock", defaultVal: false)
                 switchView.isEnabled = false
-            } else if indexPath.row == 3 {
+            } else if indexPath.row == 2 {
                 cell.textLabel?.text = "用户脚本"
                 switchView.isOn = DomainSettingsStore.shared.getBool(domain: domain, setting: "userScripts", defaultVal: true)
                 switchView.addTarget(self, action: #selector(handleSwitchChanged(_:)), for: .valueChanged)
@@ -67,9 +160,7 @@ final class DomainSettingsViewController: UITableViewController {
     }
 
     @objc private func handleSwitchChanged(_ sender: UISwitch) {
-        if sender.tag == 0 {
-            DomainSettingsStore.shared.setBool(domain: domain, setting: "alwaysNewTab", value: sender.isOn)
-        } else if sender.tag == 3 {
+        if sender.tag == 2 {
             DomainSettingsStore.shared.setBool(domain: domain, setting: "userScripts", value: sender.isOn)
             onSettingsChanged?()
         }
@@ -330,6 +421,8 @@ final class UserScriptManagerViewController: UITableViewController {
         forRowAt indexPath: IndexPath
     ) {
         if editingStyle == .delete {
+            let script = scripts[indexPath.row]
+            ScriptDataStore.shared.clearDataForScript(scriptId: script.id)
             scripts.remove(at: indexPath.row)
             UserScriptStore.shared.saveScripts(scripts)
             tableView.deleteRows(at: [indexPath], with: .automatic)
