@@ -18,8 +18,8 @@ struct UserAgentItem: Codable, Equatable {
 
 final class UserAgentStore {
     static let shared = UserAgentStore()
-    private let keyCustomItems = "browser_ua_custom_items_v3"
-    private let keySelectedId = "browser_ua_selected_id_v3"
+    private let keyCustomItems = "browser_ua_custom_items_v4"
+    private let keySelectedId = "browser_ua_selected_id_v4"
 
     private let defaultItems: [UserAgentItem] = [
         UserAgentItem(
@@ -63,6 +63,19 @@ final class UserAgentStore {
         customs.append(newItem)
         if let data = try? JSONEncoder().encode(customs) {
             UserDefaults.standard.set(data, forKey: keyCustomItems)
+        }
+    }
+
+    func updateCustomItem(id: String, name: String, uaString: String) {
+        if let data = UserDefaults.standard.data(forKey: keyCustomItems),
+           var customs = try? JSONDecoder().decode([UserAgentItem].self, from: data) {
+            if let idx = customs.firstIndex(where: { $0.id == id }) {
+                customs[idx].name = name
+                customs[idx].uaString = uaString
+                if let data = try? JSONEncoder().encode(customs) {
+                    UserDefaults.standard.set(data, forKey: keyCustomItems)
+                }
+            }
         }
     }
 
