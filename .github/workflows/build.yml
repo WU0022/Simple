@@ -10,85 +10,168 @@ jobs:
     runs-on: macos-15
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v6
 
-    - name: Generate App Icon
-      run: |
-        mkdir -p Assets.xcassets/AppIcon.appiconset
-        cat << 'EOF' > generate_icon.swift
-        import AppKit
+      - name: Prepare app icon
+        run: |
+          rm -rf Assets.xcassets
+          mkdir -p Assets.xcassets/AppIcon.appiconset
 
-        let size = CGSize(width: 1024, height: 1024)
-        let image = NSImage(size: size)
-        image.lockFocus()
-        NSColor(red: 0.1, green: 0.5, blue: 0.95, alpha: 1.0).setFill()
-        NSRect(origin: .zero, size: size).fill()
-        NSColor.white.setStroke()
-        let path = NSBezierPath()
-        path.appendArc(withCenter: CGPoint(x: 512, y: 512), radius: 260, startAngle: 0, endAngle: 360)
-        path.lineWidth = 50
-        path.stroke()
-        let innerPath = NSBezierPath()
-        innerPath.appendArc(withCenter: CGPoint(x: 512, y: 512), radius: 100, startAngle: 0, endAngle: 360)
-        NSColor.white.setFill()
-        innerPath.fill()
-        image.unlockFocus()
+          cat << 'EOF' > create_icon.swift
+          import AppKit
 
-        if let tiffData = image.tiffRepresentation, 
-           let bitmap = NSBitmapImageRep(data: tiffData), 
-           let pngData = bitmap.representation(using: .png, properties: [:]) {
-            try? pngData.write(to: URL(fileURLWithPath: "Assets.xcassets/AppIcon.appiconset/icon.png"))
-        }
-        EOF
-        swift generate_icon.swift
-        cat << 'EOF' > Assets.xcassets/AppIcon.appiconset/Contents.json
-        {
-          "images": [
-            {
-              "idiom": "universal",
-              "platform": "ios",
-              "size": "1024x1024",
-              "filename": "icon.png"
-            }
-          ],
-          "info": {
-            "version": 1,
-            "author": "xcode"
+          let canvasSize = CGSize(width: 1024, height: 1024)
+          let image = NSImage(size: canvasSize)
+
+          image.lockFocus()
+
+          let background = NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: 1024, height: 1024), xRadius: 224, yRadius: 224)
+          NSColor(red: 0.05, green: 0.38, blue: 0.86, alpha: 1).setFill()
+          background.fill()
+
+          let outerCircle = NSBezierPath(ovalIn: NSRect(x: 202, y: 202, width: 620, height: 620))
+          NSColor.white.setStroke()
+          outerCircle.lineWidth = 44
+          outerCircle.stroke()
+
+          let innerCircle = NSBezierPath(ovalIn: NSRect(x: 470, y: 470, width: 84, height: 84))
+          NSColor.white.setFill()
+          innerCircle.fill()
+
+          let needle = NSBezierPath()
+          needle.move(to: NSPoint(x: 642, y: 702))
+          needle.line(to: NSPoint(x: 418, y: 420))
+          needle.line(to: NSPoint(x: 602, y: 510))
+          needle.close()
+          NSColor.white.setFill()
+          needle.fill()
+
+          image.unlockFocus()
+
+          guard
+              let tiffData = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData),
+              let pngData = bitmap.representation(using: .png, properties: [:])
+          else {
+              exit(1)
           }
-        }
-        EOF
 
-    - name: Install XcodeGen
-      run: brew install xcodegen
+          try pngData.write(to: URL(fileURLWithPath: "Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png"))
+          EOF
 
-    - name: Generate Xcode Project
-      run: xcodegen generate
+          swift create_icon.swift
 
-    - name: Fix Xcode Project Format Compatibility
-      run: |
-        sed -i '' 's/objectVersion = [0-9]*;/objectVersion = 56;/g' SimpleBrowser.xcodeproj/project.pbxproj
+          for size in 40 58 60 76 80 87 120 152 167 180; do
+            sips -z "$size" "$size" Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png --out "Assets.xcassets/AppIcon.appiconset/Icon-$size.png" >/dev/null
+          done
 
-    - name: Build App
-      run: |
-        xcodebuild -project SimpleBrowser.xcodeproj \
-          -scheme SimpleBrowser \
-          -sdk iphoneos \
-          -configuration Release \
-          -derivedDataPath ./build \
-          CODE_SIGNING_ALLOWED=NO \
-          CODE_SIGNING_REQUIRED=NO \
-          CODE_SIGN_IDENTITY="" \
-          build
+          cat << 'EOF' > Assets.xcassets/Contents.json
+          {
+            "info" : {
+              "author" : "xcode",
+              "version" : 1
+            }
+          }
+          EOF
 
-    - name: Package IPA
-      run: |
-        mkdir -p Payload
-        cp -r build/Build/Products/Release-iphoneos/SimpleBrowser.app Payload/
-        zip -r SimpleBrowser.ipa Payload
+          cat << 'EOF' > Assets.xcassets/AppIcon.appiconset/Contents.json
+          {
+            "images" : [
+              {
+                "filename" : "Icon-40.png",
+                "idiom" : "iphone",
+                "scale" : "2x",
+                "size" : "20x20"
+              },
+              {
+                "filename" : "Icon-60.png",
+                "idiom" : "iphone",
+                "scale" : "3x",
+                "size" : "20x20"
+              },
+              {
+                "filename" : "Icon-58.png",
+                "idiom" : "iphone",
+                "scale" : "2x",
+                "size" : "29x29"
+              },
+              {
+                "filename" : "Icon-87.png",
+                "idiom" : "iphone",
+                "scale" : "3x",
+                "size" : "29x29"
+              },
+              {
+                "filename" : "Icon-80.png",
+                "idiom" : "iphone",
+                "scale" : "2x",
+                "size" : "40x40"
+              },
+              {
+                "filename" : "Icon-120.png",
+                "idiom" : "iphone",
+                "scale" : "3x",
+                "size" : "40x40"
+              },
+              {
+                "filename" : "Icon-120.png",
+                "idiom" : "iphone",
+                "scale" : "2x",
+                "size" : "60x60"
+              },
+              {
+                "filename" : "Icon-180.png",
+                "idiom" : "iphone",
+                "scale" : "3x",
+                "size" : "60x60"
+              },
+              {
+                "filename" : "AppIcon-1024.png",
+                "idiom" : "ios-marketing",
+                "scale" : "1x",
+                "size" : "1024x1024"
+              }
+            ],
+            "info" : {
+              "author" : "xcode",
+              "version" : 1
+            }
+          }
+          EOF
 
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: SimpleBrowser-IPA
-        path: SimpleBrowser.ipa
+      - name: Remove unused Homebrew tap
+        run: brew untap aws/tap || true
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build app
+        run: |
+          xcodebuild \
+            -project SimpleBrowser.xcodeproj \
+            -scheme SimpleBrowser \
+            -sdk iphoneos \
+            -configuration Release \
+            -derivedDataPath ./build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package IPA
+        run: |
+          rm -rf Payload SimpleBrowser.ipa
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/SimpleBrowser.app Payload/
+          zip -qry SimpleBrowser.ipa Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v6
+        with:
+          name: SimpleBrowser-IPA
+          path: SimpleBrowser.ipa
+          if-no-files-found: error
