@@ -102,6 +102,10 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         configureFullscreenExitGesture()
         configureInstallerObserver()
         createNewTab(loadURL: nil)
+
+        DispatchQueue.main.async { [weak self] in
+            EyeProtectionManager.shared.restoreState(in: self?.view.window)
+        }
     }
 
     deinit {
@@ -179,7 +183,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         siteSettingsButton.tintColor = .secondaryLabel
         siteSettingsButton.setImage(
             UIImage(
-                systemName: "slider.horizontal.2",
+                systemName: "slider.horizontal.3",
                 withConfiguration: UIImage.SymbolConfiguration(pointSize: 13, weight: .medium)
             ),
             for: .normal
@@ -947,15 +951,44 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             }
         )
 
-        let isEyeProtectionOn = EyeProtectionManager.shared.isEnabled
-        let eyeProtectionTitle = isEyeProtectionOn ? "关闭护眼模式" : "开启护眼模式"
-        alert.addAction(UIAlertAction(title: eyeProtectionTitle, style: .default) { [weak self] _ in
+        let isEyeOn = EyeProtectionManager.shared.isEnabled
+        alert.addAction(UIAlertAction(title: isEyeOn ? "关闭护眼模式" : "开启护眼模式", style: .default) { [weak self] _ in
             EyeProtectionManager.shared.toggle(in: self?.view.window)
+        })
+
+        let currentUAMode = UserAgentStore.shared.getMode()
+        alert.addAction(UIAlertAction(title: "浏览器标识 (\(currentUAMode.rawValue))", style: .default) { [weak self] _ in
+            self?.showUserAgentMenu()
+        })
+
+        let isDesktop = currentUAMode == .desktop
+        alert.addAction(UIAlertAction(title: isDesktop ? "切换为移动版网页" : "切换为电脑版网页", style: .default) { [weak self] _ in
+            let nextMode: UserAgentMode = isDesktop ? .mobileSafari : .desktop
+            UserAgentStore.shared.setMode(nextMode)
+            self?.activeTab.webView.customUserAgent = nextMode.userAgentString
+            self?.activeTab.webView.reload()
         })
 
         alert.addAction(UIAlertAction(title: "清除数据", style: .default) { [weak self] _ in
             self?.showCleanDataMenu()
         })
+
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        present(alert, animated: true)
+    }
+
+    private func showUserAgentMenu() {
+        let alert = UIAlertController(title: "选择浏览器标识 (User-Agent)", message: nil, preferredStyle: .actionSheet)
+        let currentMode = UserAgentStore.shared.getMode()
+
+        for mode in UserAgentMode.allCases {
+            let mark = mode == currentMode ? " ✓" : ""
+            alert.addAction(UIAlertAction(title: mode.rawValue + mark, style: .default) { [weak self] _ in
+                UserAgentStore.shared.setMode(mode)
+                self?.activeTab.webView.customUserAgent = mode.userAgentString
+                self?.activeTab.webView.reload()
+            })
+        }
 
         alert.addAction(UIAlertAction(title: "取消", style: .cancel))
         present(alert, animated: true)
