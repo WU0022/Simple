@@ -63,6 +63,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     private let homeView = UIView()
     private let bottomPanel = UIView()
     private let addressContainer = UIView()
+    private let siteSettingsButton = TouchButton(type: .system)
     private let addressField = UITextField()
     private let refreshButton = TouchButton(type: .system)
     private let clearButton = TouchButton(type: .system)
@@ -174,6 +175,17 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         addressContainer.layer.shadowOffset = CGSize(width: 0, height: 3)
         addressContainer.clipsToBounds = true
 
+        siteSettingsButton.translatesAutoresizingMaskIntoConstraints = false
+        siteSettingsButton.tintColor = .secondaryLabel
+        siteSettingsButton.setImage(
+            UIImage(
+                systemName: "slider.horizontal.3",
+                withConfiguration: UIImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+            ),
+            for: .normal
+        )
+        siteSettingsButton.addTarget(self, action: #selector(showSiteDomainSettings), for: .touchUpInside)
+
         addressField.translatesAutoresizingMaskIntoConstraints = false
         addressField.delegate = self
         addressField.placeholder = "搜索或输入网址"
@@ -236,6 +248,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         navigationStack.addArrangedSubview(tabsButton)
         navigationStack.addArrangedSubview(moreButton)
 
+        addressContainer.addSubview(siteSettingsButton)
         addressContainer.addSubview(addressField)
         addressContainer.addSubview(refreshButton)
         addressContainer.addSubview(clearButton)
@@ -276,6 +289,11 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             addressContainer.trailingAnchor.constraint(equalTo: bottomPanel.trailingAnchor, constant: -14),
             addressContainer.heightAnchor.constraint(equalToConstant: 36),
 
+            siteSettingsButton.leadingAnchor.constraint(equalTo: addressContainer.leadingAnchor, constant: 8),
+            siteSettingsButton.centerYAnchor.constraint(equalTo: addressContainer.centerYAnchor),
+            siteSettingsButton.widthAnchor.constraint(equalToConstant: 24),
+            siteSettingsButton.heightAnchor.constraint(equalToConstant: 24),
+
             progressView.leadingAnchor.constraint(equalTo: addressContainer.leadingAnchor),
             progressView.trailingAnchor.constraint(equalTo: addressContainer.trailingAnchor),
             progressView.bottomAnchor.constraint(equalTo: addressContainer.bottomAnchor),
@@ -291,7 +309,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             clearButton.widthAnchor.constraint(equalToConstant: 24),
             clearButton.heightAnchor.constraint(equalToConstant: 24),
 
-            addressField.leadingAnchor.constraint(equalTo: addressContainer.leadingAnchor, constant: 16),
+            addressField.leadingAnchor.constraint(equalTo: siteSettingsButton.trailingAnchor, constant: 6),
             addressField.trailingAnchor.constraint(equalTo: refreshButton.leadingAnchor, constant: -6),
             addressField.topAnchor.constraint(equalTo: addressContainer.topAnchor),
             addressField.bottomAnchor.constraint(equalTo: addressContainer.bottomAnchor),
@@ -529,7 +547,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     private func showLoadError(_ error: Error) {
         let nsError = error as NSError
 
-        guard nsError.code != NSURLErrorCancelled else {
+        guard nsError.domain != "WebKitErrorDomain" && nsError.code != NSURLErrorCancelled && nsError.code != 102 else {
             return
         }
 
@@ -558,6 +576,10 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             self.refreshButton.alpha = editing ? 0 : 1
             self.clearButton.alpha = editing ? 1 : 0
         }
+    }
+
+    func tabRequestNewTab(url: URL) {
+        createNewTab(loadURL: url)
     }
 
     func tabDidUpdate(_ tab: TabItem) {
@@ -726,6 +748,53 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         activeTab.webView.goForward()
     }
 
+    @objc private func showSiteDomainSettings() {
+        dismissKeyboard()
+        guard let host = activeTab.url?.host else { return }
+
+        let settingsVC = DomainSettingsViewController(domain: host) { [weak self] in
+            self?.activeTab.reloadUserScripts()
+        }
+        settingsVC.onExtractText = { [weak self] in
+            self?.extractPageText()
+        }
+
+        let nav = UINavigationController(rootViewController: settingsVC)
+        nav.modalPresentationStyle = .pageSheet
+        present(nav, animated: true)
+    }
+
+    private func extractPageText() {
+        activeTab.webView.evaluateJavaScript("document.body.innerText") { [weak self] result, error in
+            guard let text = result as? String, !text.isEmpty else { return }
+            let vc = UIViewController()
+            vc.title = "网页正文内容"
+            vc.view.backgroundColor = .systemBackground
+
+            let textView = UITextView()
+            textView.translatesAutoresizingMaskIntoConstraints = false
+            textView.font = .systemFont(ofSize: 15)
+            textView.isEditable = false
+            textView.text = text
+
+            vc.view.addSubview(textView)
+            NSLayoutConstraint.activate([
+                textView.topAnchor.constraint(equalTo: vc.view.topAnchor),
+                textView.leadingAnchor.constraint(equalTo: vc.view.leadingAnchor),
+                textView.trailingAnchor.constraint(equalTo: vc.view.trailingAnchor),
+                textView.bottomAnchor.constraint(equalTo: vc.view.bottomAnchor)
+            ])
+
+            vc.navigationItem.rightBarButtonItem = UIBarButtonItem(title: "完成", style: .done, target: self, action: #selector(self?.dismissModalVC))
+            let nav = UINavigationController(rootViewController: vc)
+            self?.present(nav, animated: true)
+        }
+    }
+
+    @objc private func dismissModalVC() {
+        dismiss(animated: true)
+    }
+
     @objc private func showPluginPanel() {
         dismissKeyboard()
         let currentUrlStr = activeTab.url?.absoluteString ?? ""
@@ -864,14 +933,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             }
         )
 
-        if let currentHost = activeTab.url?.host {
-            let isLocked = CookieLockStore.shared.isLocked(domain: currentHost)
-            let lockTitle = isLocked ? "🔒 当前域名 Cookie 已锁定保护" : "🔓 锁定当前域名 Cookie (防误删)"
-            alert.addAction(UIAlertAction(title: lockTitle, style: .default) { _ in
-                CookieLockStore.shared.toggleLock(domain: currentHost)
-            })
-        }
-
         alert.addAction(UIAlertAction(title: "清理隐私与缓存数据", style: .destructive) { [weak self] _ in
             self?.showCleanDataMenu()
         })
@@ -881,16 +942,16 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     }
 
     private func showCleanDataMenu() {
-        let alert = UIAlertController(title: "清理数据", message: "请选择要清理的分类：", preferredStyle: .actionSheet)
+        let alert = UIAlertController(title: "清理数据", message: nil, preferredStyle: .actionSheet)
 
-        alert.addAction(UIAlertAction(title: "🧹 清理网页缓存文件 (不删登录)", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: "清理网页缓存文件", style: .default) { [weak self] _ in
             let cacheTypes = Set([WKWebsiteDataTypeFetchCache, WKWebsiteDataTypeDiskCache, WKWebsiteDataTypeMemoryCache])
             WKWebsiteDataStore.default().removeData(ofTypes: cacheTypes, modifiedSince: .distantPast) {
                 self?.activeTab.webView.reload()
             }
         })
 
-        alert.addAction(UIAlertAction(title: "🍪 清理 Cookie 账号 (保留锁定保护项)", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: "清理 Cookie 数据", style: .default) { [weak self] _ in
             let store = WKWebsiteDataStore.default().httpCookieStore
             store.getAllCookies { cookies in
                 for cookie in cookies {
@@ -902,13 +963,13 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             }
         })
 
-        alert.addAction(UIAlertAction(title: "🔍 清理搜索历史记录", style: .default) { _ in
+        alert.addAction(UIAlertAction(title: "清理搜索历史记录", style: .default) { _ in
             SearchHistoryStore.shared.clearHistory()
         })
 
-        alert.addAction(UIAlertAction(title: "🔒 管理 Cookie 锁定列表", style: .default) { [weak self] _ in
-            let lockManager = CookieLockManagerViewController()
-            let nav = UINavigationController(rootViewController: lockManager)
+        alert.addAction(UIAlertAction(title: "管理网站数据", style: .default) { [weak self] _ in
+            let manager = WebsiteDataManagerViewController()
+            let nav = UINavigationController(rootViewController: manager)
             self?.present(nav, animated: true)
         })
 
