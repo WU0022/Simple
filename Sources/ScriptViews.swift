@@ -1,6 +1,62 @@
 import UIKit
 import WebKit
 
+struct MenuSheetItem {
+    let title: String
+    let style: UIAlertAction.Style
+    let handler: (() -> Void)?
+}
+
+final class MenuSheetViewController: UITableViewController {
+    private var items: [MenuSheetItem] = []
+    private var headerTitle: String?
+
+    init(title: String? = nil, items: [MenuSheetItem]) {
+        self.headerTitle = title
+        self.items = items
+        super.init(style: .insetGrouped)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        self.title = headerTitle
+        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "MenuItemCell")
+    }
+
+    override func numberOfSections(in tableView: UITableView) -> Int {
+        return 1
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return items.count
+    }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "MenuItemCell", for: indexPath)
+        let item = items[indexPath.row]
+        var config = cell.defaultContentConfiguration()
+        config.text = item.title
+        config.textProperties.alignment = .center
+        if item.style == .destructive {
+            config.textProperties.color = .systemRed
+        } else {
+            config.textProperties.color = .label
+        }
+        cell.contentConfiguration = config
+        return cell
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        let item = items[indexPath.row]
+        dismiss(animated: true) {
+            item.handler?()
+        }
+    }
+}
+
 final class UserAgentManagerViewController: UITableViewController {
     private var items: [UserAgentItem] = []
     private var selectedId: String = ""
