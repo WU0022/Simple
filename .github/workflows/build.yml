@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-15
 
     steps:
     - name: Checkout repository
@@ -18,6 +18,10 @@ jobs:
 
     - name: Generate Xcode Project
       run: xcodegen generate
+
+    - name: Fix Xcode Project Format Compatibility
+      run: |
+        sed -i '' 's/objectVersion = [0-9]*;/objectVersion = 56;/g' SimpleBrowser.xcodeproj/project.pbxproj
 
     - name: Build App
       run: |
