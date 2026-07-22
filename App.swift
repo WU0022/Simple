@@ -126,22 +126,6 @@ final class TabItem: NSObject, WKNavigationDelegate {
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
 
-        let userContentController = WKUserContentController()
-
-        let gmPolyfill = "window.unsafeWindow = window; window.GM_addStyle = function(css) { var style = document.createElement('style'); style.type = 'text/css'; style.appendChild(document.createTextNode(css)); (document.head || document.documentElement).appendChild(style); return style; }; window.GM_setValue = function(name, value) { localStorage.setItem('GM_' + name, JSON.stringify(value)); }; window.GM_getValue = function(name, defaultValue) { var val = localStorage.getItem('GM_' + name); return val ? JSON.parse(val) : defaultValue; }; window.GM_log = function(msg) { console.log('[Tampermonkey Log]', msg); };"
-        userContentController.addUserScript(
-            WKUserScript(source: gmPolyfill, injectionTime: .atDocumentStart, forMainFrameOnly: false)
-        )
-
-        let scripts = UserScriptStore.shared.loadScripts()
-        for script in scripts where script.isEnabled {
-            userContentController.addUserScript(
-                WKUserScript(source: script.code, injectionTime: .atDocumentEnd, forMainFrameOnly: false)
-            )
-        }
-
-        configuration.userContentController = userContentController
-
         webView = WKWebView(frame: .zero, configuration: configuration)
         super.init()
 
@@ -153,20 +137,45 @@ final class TabItem: NSObject, WKNavigationDelegate {
         webView.isOpaque = true
     }
 
-    func reloadUserScripts() {
-        webView.configuration.userContentController.removeAllUserScripts()
+    func injectAndRunUserScripts() {
+        let scripts = UserScriptStore.shared.loadScripts().filter { $0.isEnabled }
+        guard !scripts.isEmpty else { return }
 
-        let gmPolyfill = "window.unsafeWindow = window; window.GM_addStyle = function(css) { var style = document.createElement('style'); style.type = 'text/css'; style.appendChild(document.createTextNode(css)); (document.head || document.documentElement).appendChild(style); return style; }; window.GM_setValue = function(name, value) { localStorage.setItem('GM_' + name, JSON.stringify(value)); }; window.GM_getValue = function(name, defaultValue) { var val = localStorage.getItem('GM_' + name); return val ? JSON.parse(val) : defaultValue; }; window.GM_log = function(msg) { console.log('[Tampermonkey Log]', msg); };"
-        webView.configuration.userContentController.addUserScript(
-            WKUserScript(source: gmPolyfill, injectionTime: .atDocumentStart, forMainFrameOnly: false)
-        )
-
-        let scripts = UserScriptStore.shared.loadScripts()
-        for script in scripts where script.isEnabled {
-            webView.configuration.userContentController.addUserScript(
-                WKUserScript(source: script.code, injectionTime: .atDocumentEnd, forMainFrameOnly: false)
-            )
+        let gmPolyfill = """
+        if (!window.__gm_polyfilled__) {
+            window.__gm_polyfilled__ = true;
+            window.unsafeWindow = window;
+            window.GM_addStyle = function(css) {
+                var style = document.createElement('style');
+                style.type = 'text/css';
+                style.appendChild(document.createTextNode(css));
+                (document.head || document.documentElement).appendChild(style);
+                return style;
+            };
+            window.GM_setValue = function(name, value) {
+                localStorage.setItem('GM_' + name, JSON.stringify(value));
+            };
+            window.GM_getValue = function(name, defaultValue) {
+                var val = localStorage.getItem('GM_' + name);
+                return val ? JSON.parse(val) : defaultValue;
+            };
+            window.GM_log = function(msg) {
+                console.log('[Tampermonkey Log]', msg);
+            };
         }
+        """
+
+        var fullJS = gmPolyfill + "\n"
+        for script in scripts {
+            fullJS += "try { \n" + script.code + "\n } catch(e) { console.error('[UserScript Error]', e); }\n"
+        }
+
+        webView.evaluateJavaScript(fullJS, completionHandler: nil)
+    }
+
+    func reloadUserScripts() {
+        injectAndRunUserScripts()
+        webView.reload()
     }
 
     func updateSnapshot(completion: (() -> Void)? = nil) {
@@ -192,6 +201,7 @@ final class TabItem: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         url = webView.url
         title = webView.title ?? url?.host ?? "新标签页"
+        injectAndRunUserScripts()
         delegate?.tabDidUpdate(self)
     }
 
@@ -199,6 +209,7 @@ final class TabItem: NSObject, WKNavigationDelegate {
         isLoading = false
         url = webView.url
         title = webView.title ?? url?.host ?? "新标签页"
+        injectAndRunUserScripts()
         updateSnapshot()
         delegate?.tabDidUpdate(self)
     }
@@ -903,7 +914,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         let manager = UserScriptManagerViewController()
         manager.onScriptsUpdated = { [weak self] in
             self?.activeTab.reloadUserScripts()
-            self?.activeTab.webView.reload()
         }
         let nav = UINavigationController(rootViewController: manager)
         nav.modalPresentationStyle = .pageSheet
