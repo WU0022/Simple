@@ -24,10 +24,6 @@ final class UserAgentManagerViewController: UITableViewController {
             action: #selector(handleDone)
         )
 
-        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleCellLongPress(_:)))
-        longPress.minimumPressDuration = 1.0
-        tableView.addGestureRecognizer(longPress)
-
         loadData()
     }
 
@@ -42,8 +38,8 @@ final class UserAgentManagerViewController: UITableViewController {
     }
 
     @objc private func handleAddCustomUA() {
-        let alert = UIAlertController(title: "添加自定义标识", message: "请输入标识名称与完整的 User-Agent 字符串", preferredStyle: .alert)
-        alert.addTextField { tf in tf.placeholder = "标识名称 (如: iPad)" }
+        let alert = UIAlertController(title: "添加自定义标识", message: nil, preferredStyle: .alert)
+        alert.addTextField { tf in tf.placeholder = "标识名称" }
         alert.addTextField { tf in tf.placeholder = "User-Agent 字符串" }
 
         alert.addAction(UIAlertAction(title: "添加", style: .default) { [weak self] _ in
@@ -57,29 +53,31 @@ final class UserAgentManagerViewController: UITableViewController {
         present(alert, animated: true)
     }
 
-    @objc private func handleCellLongPress(_ gesture: UILongPressGestureRecognizer) {
-        guard gesture.state == .began else { return }
-        let point = gesture.location(in: tableView)
-        guard let indexPath = tableView.indexPathForRow(at: point) else { return }
-        let item = items[indexPath.row]
-
-        let feedback = UIImpactFeedbackGenerator(style: .medium)
-        feedback.impactOccurred()
-
-        let alert = UIAlertController(title: item.name, message: item.uaString, preferredStyle: .actionSheet)
-        alert.addAction(UIAlertAction(title: "复制 User-Agent", style: .default) { _ in
-            UIPasteboard.general.string = item.uaString
-        })
-
-        if item.isCustom {
-            alert.addAction(UIAlertAction(title: "删除此自定义标识", style: .destructive) { [weak self] _ in
-                UserAgentStore.shared.deleteCustomItem(id: item.id)
-                self?.loadData()
-                let currentUA = UserAgentStore.shared.getSelectedUA()
-                self?.onUASelected?(currentUA)
-            })
+    private func showEditUAAlert(item: UserAgentItem) {
+        let alert = UIAlertController(title: "编辑标识", message: nil, preferredStyle: .alert)
+        alert.addTextField { tf in
+            tf.placeholder = "标识名称"
+            tf.text = item.name
+        }
+        alert.addTextField { tf in
+            tf.placeholder = "User-Agent 字符串"
+            tf.text = item.uaString
         }
 
+        alert.addAction(UIAlertAction(title: "保存", style: .default) { [weak self] _ in
+            guard let name = alert.textFields?[0].text?.trimmingCharacters(in: .whitespaces), !name.isEmpty,
+                  let ua = alert.textFields?[1].text?.trimmingCharacters(in: .whitespaces), !ua.isEmpty else { return }
+
+            if item.isCustom {
+                UserAgentStore.shared.updateCustomItem(id: item.id, name: name, uaString: ua)
+            } else {
+                UserAgentStore.shared.addCustomItem(name: name, uaString: ua)
+            }
+            self?.loadData()
+            let currentUA = UserAgentStore.shared.getSelectedUA()
+            self?.onUASelected?(currentUA)
+        })
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
         present(alert, animated: true)
     }
 
@@ -109,6 +107,29 @@ final class UserAgentManagerViewController: UITableViewController {
         onUASelected?(item.uaString)
         dismiss(animated: true)
     }
+
+    override func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        let item = items[indexPath.row]
+
+        let editAction = UIContextualAction(style: .normal, title: "编辑") { [weak self] _, _, completion in
+            self?.showEditUAAlert(item: item)
+            completion(true)
+        }
+        editAction.backgroundColor = .systemBlue
+
+        if item.isCustom {
+            let deleteAction = UIContextualAction(style: .destructive, title: "删除") { [weak self] _, _, completion in
+                UserAgentStore.shared.deleteCustomItem(id: item.id)
+                self?.loadData()
+                let currentUA = UserAgentStore.shared.getSelectedUA()
+                self?.onUASelected?(currentUA)
+                completion(true)
+            }
+            return UISwipeActionsConfiguration(actions: [deleteAction, editAction])
+        } else {
+            return UISwipeActionsConfiguration(actions: [editAction])
+        }
+    }
 }
 
 enum CleanOption: Hashable {
@@ -127,13 +148,7 @@ final class CleanDataSelectionViewController: UITableViewController {
         super.viewDidLoad()
         title = "清除数据"
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "CleanCell")
-
-        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "取消", style: .plain, target: self, action: #selector(handleCancel))
-        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "确认清除", style: .done, target: self, action: #selector(handleConfirm))
-    }
-
-    @objc private func handleCancel() {
-        dismiss(animated: true)
+        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "完成", style: .done, target: self, action: #selector(handleConfirm))
     }
 
     @objc private func handleConfirm() {
@@ -144,11 +159,12 @@ final class CleanDataSelectionViewController: UITableViewController {
     }
 
     override func numberOfSections(in tableView: UITableView) -> Int {
-        return 2
+        return 3
     }
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        return section == 0 ? 4 : 1
+        if section == 0 { return 4 }
+        return 1
     }
 
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
@@ -173,6 +189,10 @@ final class CleanDataSelectionViewController: UITableViewController {
 
             let isChecked = selectedOptions.contains(option)
             cell.accessoryType = isChecked ? .checkmark : .none
+        } else if indexPath.section == 1 {
+            cell.textLabel?.text = "确认清除"
+            cell.textLabel?.textColor = .systemRed
+            cell.textLabel?.textAlignment = .center
         } else {
             cell.textLabel?.text = "管理网站数据"
             cell.textLabel?.textColor = .systemBlue
@@ -200,6 +220,8 @@ final class CleanDataSelectionViewController: UITableViewController {
                 selectedOptions.insert(option)
             }
             tableView.reloadRows(at: [indexPath], with: .automatic)
+        } else if indexPath.section == 1 {
+            handleConfirm()
         } else {
             dismiss(animated: true) { [weak self] in
                 self?.onOpenWebsiteDataManager?()
@@ -323,7 +345,6 @@ final class WebsiteDataManagerViewController: UITableViewController {
                 self.loadData()
             }
         })
-        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
         present(alert, animated: true)
     }
 
@@ -365,7 +386,6 @@ final class WebsiteDataManagerViewController: UITableViewController {
                 self?.loadData()
             }
         })
-        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
         present(alert, animated: true)
     }
 
