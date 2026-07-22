@@ -1,6 +1,116 @@
 import UIKit
 import WebKit
 
+final class UserAgentManagerViewController: UITableViewController {
+    private var items: [UserAgentItem] = []
+    private var selectedId: String = ""
+    var onUASelected: ((String) -> Void)?
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        title = "浏览器标识"
+        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "UACell")
+
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            image: UIImage(systemName: "plus"),
+            style: .plain,
+            target: self,
+            action: #selector(handleAddCustomUA)
+        )
+        navigationItem.leftBarButtonItem = UIBarButtonItem(
+            title: "完成",
+            style: .done,
+            target: self,
+            action: #selector(handleDone)
+        )
+
+        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleCellLongPress(_:)))
+        longPress.minimumPressDuration = 1.0
+        tableView.addGestureRecognizer(longPress)
+
+        loadData()
+    }
+
+    private func loadData() {
+        items = UserAgentStore.shared.loadAllItems()
+        selectedId = UserAgentStore.shared.getSelectedId()
+        tableView.reloadData()
+    }
+
+    @objc private func handleDone() {
+        dismiss(animated: true)
+    }
+
+    @objc private func handleAddCustomUA() {
+        let alert = UIAlertController(title: "添加自定义标识", message: "请输入标识名称与完整的 User-Agent 字符串", preferredStyle: .alert)
+        alert.addTextField { tf in tf.placeholder = "标识名称 (如: iPad)" }
+        alert.addTextField { tf in tf.placeholder = "User-Agent 字符串" }
+
+        alert.addAction(UIAlertAction(title: "添加", style: .default) { [weak self] _ in
+            guard let name = alert.textFields?[0].text?.trimmingCharacters(in: .whitespaces), !name.isEmpty,
+                  let ua = alert.textFields?[1].text?.trimmingCharacters(in: .whitespaces), !ua.isEmpty else { return }
+
+            UserAgentStore.shared.addCustomItem(name: name, uaString: ua)
+            self?.loadData()
+        })
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        present(alert, animated: true)
+    }
+
+    @objc private func handleCellLongPress(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began else { return }
+        let point = gesture.location(in: tableView)
+        guard let indexPath = tableView.indexPathForRow(at: point) else { return }
+        let item = items[indexPath.row]
+
+        let feedback = UIImpactFeedbackGenerator(style: .medium)
+        feedback.impactOccurred()
+
+        let alert = UIAlertController(title: item.name, message: item.uaString, preferredStyle: .actionSheet)
+        alert.addAction(UIAlertAction(title: "复制 User-Agent", style: .default) { _ in
+            UIPasteboard.general.string = item.uaString
+        })
+
+        if item.isCustom {
+            alert.addAction(UIAlertAction(title: "删除此自定义标识", style: .destructive) { [weak self] _ in
+                UserAgentStore.shared.deleteCustomItem(id: item.id)
+                self?.loadData()
+                let currentUA = UserAgentStore.shared.getSelectedUA()
+                self?.onUASelected?(currentUA)
+            })
+        }
+
+        present(alert, animated: true)
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return items.count
+    }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "UACell", for: indexPath)
+        let item = items[indexPath.row]
+
+        var content = cell.defaultContentConfiguration()
+        content.text = item.name
+        cell.contentConfiguration = content
+
+        cell.accessoryType = item.id == selectedId ? .checkmark : .none
+        return cell
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        let item = items[indexPath.row]
+        selectedId = item.id
+        UserAgentStore.shared.setSelectedId(item.id)
+        tableView.reloadData()
+
+        onUASelected?(item.uaString)
+        dismiss(animated: true)
+    }
+}
+
 enum CleanOption: Hashable {
     case cache
     case cookies
