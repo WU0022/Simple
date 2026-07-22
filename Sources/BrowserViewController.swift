@@ -239,13 +239,13 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         addressContainer.addSubview(refreshButton)
         addressContainer.addSubview(clearButton)
 
+        bottomPanel.addSubview(progressView)
         bottomPanel.addSubview(addressContainer)
         bottomPanel.addSubview(navigationStack)
 
         view.addSubview(webContainer)
         view.addSubview(homeView)
         view.addSubview(bottomPanel)
-        view.addSubview(progressView)
 
         bottomPanelBottomConstraint = bottomPanel.bottomAnchor.constraint(equalTo: view.bottomAnchor)
 
@@ -270,7 +270,12 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             bottomPanel.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             bottomPanelBottomConstraint!,
 
-            addressContainer.topAnchor.constraint(equalTo: bottomPanel.topAnchor, constant: 6),
+            progressView.topAnchor.constraint(equalTo: bottomPanel.topAnchor),
+            progressView.leadingAnchor.constraint(equalTo: bottomPanel.leadingAnchor),
+            progressView.trailingAnchor.constraint(equalTo: bottomPanel.trailingAnchor),
+            progressView.heightAnchor.constraint(equalToConstant: 2),
+
+            addressContainer.topAnchor.constraint(equalTo: progressView.bottomAnchor, constant: 6),
             addressContainer.leadingAnchor.constraint(equalTo: bottomPanel.leadingAnchor, constant: 14),
             addressContainer.trailingAnchor.constraint(equalTo: bottomPanel.trailingAnchor, constant: -14),
             addressContainer.heightAnchor.constraint(equalToConstant: 36),
@@ -294,15 +299,8 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             navigationStack.leadingAnchor.constraint(equalTo: bottomPanel.leadingAnchor, constant: 10),
             navigationStack.trailingAnchor.constraint(equalTo: bottomPanel.trailingAnchor, constant: -10),
             navigationStack.bottomAnchor.constraint(equalTo: bottomPanel.safeAreaLayoutGuide.bottomAnchor, constant: -1),
-            navigationStack.heightAnchor.constraint(equalToConstant: 38),
-
-            progressView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            progressView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            progressView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            progressView.heightAnchor.constraint(equalToConstant: 2)
+            navigationStack.heightAnchor.constraint(equalToConstant: 38)
         ])
-
-        view.bringSubviewToFront(progressView)
     }
 
     private func configureToolbarButton(_ button: TouchButton, imageName: String, action: Selector?) {
@@ -428,7 +426,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
                 self.progressView.alpha = 1
                 self.progressView.setProgress(Float(observedWebView.estimatedProgress), animated: true)
-                self.view.bringSubviewToFront(self.progressView)
             }
         }
     }
@@ -483,6 +480,8 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         guard !value.isEmpty else {
             return nil
         }
+
+        SearchHistoryStore.shared.addHistory(value)
 
         var urlString = value
         if !urlString.hasPrefix("http://") && !urlString.hasPrefix("https://") {
@@ -871,23 +870,52 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             }
         )
 
-        if let url = activeTab.url {
-            alert.addAction(UIAlertAction(title: "复制链接", style: .default) { _ in
-                UIPasteboard.general.url = url
-            })
-
-            alert.addAction(UIAlertAction(title: "在 Safari 中打开", style: .default) { _ in
-                UIApplication.shared.open(url)
+        if let currentHost = activeTab.url?.host {
+            let isLocked = CookieLockStore.shared.isLocked(domain: currentHost)
+            let lockTitle = isLocked ? "🔒 当前域名 Cookie 已锁定保护" : "🔓 锁定当前域名 Cookie (防误删)"
+            alert.addAction(UIAlertAction(title: lockTitle, style: .default) { _ in
+                CookieLockStore.shared.toggleLock(domain: currentHost)
             })
         }
 
-        alert.addAction(UIAlertAction(title: "清除缓存", style: .destructive) { [weak self] _ in
-            WKWebsiteDataStore.default().removeData(
-                ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(),
-                modifiedSince: .distantPast
-            ) {
+        alert.addAction(UIAlertAction(title: "清理隐私与缓存数据", style: .destructive) { [weak self] _ in
+            self?.showCleanDataMenu()
+        })
+
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        present(alert, animated: true)
+    }
+
+    private func showCleanDataMenu() {
+        let alert = UIAlertController(title: "清理数据", message: "请选择要清理的分类：", preferredStyle: .actionSheet)
+
+        alert.addAction(UIAlertAction(title: "🧹 清理网页缓存文件 (不删登录)", style: .default) { [weak self] _ in
+            let cacheTypes = Set([WKWebsiteDataTypeFetchCache, WKWebsiteDataTypeDiskCache, WKWebsiteDataTypeMemoryCache])
+            WKWebsiteDataStore.default().removeData(ofTypes: cacheTypes, modifiedSince: .distantPast) {
                 self?.activeTab.webView.reload()
             }
+        })
+
+        alert.addAction(UIAlertAction(title: "🍪 清理 Cookie 账号 (保留锁定保护项)", style: .default) { [weak self] _ in
+            let store = WKWebsiteDataStore.default().httpCookieStore
+            store.getAllCookies { cookies in
+                for cookie in cookies {
+                    if !CookieLockStore.shared.isLocked(domain: cookie.domain) {
+                        store.delete(cookie)
+                    }
+                }
+                self?.activeTab.webView.reload()
+            }
+        })
+
+        alert.addAction(UIAlertAction(title: "🔍 清理搜索历史记录", style: .default) { _ in
+            SearchHistoryStore.shared.clearHistory()
+        })
+
+        alert.addAction(UIAlertAction(title: "🔒 管理 Cookie 锁定列表", style: .default) { [weak self] _ in
+            let lockManager = CookieLockManagerViewController()
+            let nav = UINavigationController(rootViewController: lockManager)
+            self?.present(nav, animated: true)
         })
 
         alert.addAction(UIAlertAction(title: "取消", style: .cancel))
