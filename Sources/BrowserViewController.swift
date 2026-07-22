@@ -179,7 +179,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         siteSettingsButton.tintColor = .secondaryLabel
         siteSettingsButton.setImage(
             UIImage(
-                systemName: "slider.horizontal.3",
+                systemName: "slider.horizontal.2",
                 withConfiguration: UIImage.SymbolConfiguration(pointSize: 13, weight: .medium)
             ),
             for: .normal
@@ -674,8 +674,10 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
     @objc private func keyboardWillChangeFrame(_ notification: Notification) {
         guard addressField.isFirstResponder else {
-            bottomPanelBottomConstraint?.constant = 0
-            view.layoutIfNeeded()
+            if bottomPanelBottomConstraint?.constant != 0 {
+                bottomPanelBottomConstraint?.constant = 0
+                view.layoutIfNeeded()
+            }
             return
         }
 
@@ -701,6 +703,14 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     }
 
     @objc private func keyboardWillHide(_ notification: Notification) {
+        guard addressField.isFirstResponder else {
+            if bottomPanelBottomConstraint?.constant != 0 {
+                bottomPanelBottomConstraint?.constant = 0
+                view.layoutIfNeeded()
+            }
+            return
+        }
+
         guard let userInfo = notification.userInfo,
               let duration = userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? TimeInterval else {
             bottomPanelBottomConstraint?.constant = 0
@@ -852,6 +862,10 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             }
         })
 
+        alert.addAction(UIAlertAction(title: "🧹 清除该脚本缓存数据", style: .default) { _ in
+            ScriptDataStore.shared.clearDataForScript(scriptId: script.id)
+        })
+
         alert.addAction(UIAlertAction(title: "📝 编辑脚本代码", style: .default) { [weak self] _ in
             let editor = UserScriptEditorViewController(script: script)
             editor.onSave = { updatedScript in
@@ -933,7 +947,13 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             }
         )
 
-        alert.addAction(UIAlertAction(title: "清理隐私与缓存数据", style: .destructive) { [weak self] _ in
+        let isEyeProtectionOn = EyeProtectionManager.shared.isEnabled
+        let eyeProtectionTitle = isEyeProtectionOn ? "关闭护眼模式" : "开启护眼模式"
+        alert.addAction(UIAlertAction(title: eyeProtectionTitle, style: .default) { [weak self] _ in
+            EyeProtectionManager.shared.toggle(in: self?.view.window)
+        })
+
+        alert.addAction(UIAlertAction(title: "清除数据", style: .default) { [weak self] _ in
             self?.showCleanDataMenu()
         })
 
@@ -942,16 +962,26 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     }
 
     private func showCleanDataMenu() {
-        let alert = UIAlertController(title: "清理数据", message: nil, preferredStyle: .actionSheet)
+        let cleanVC = CleanDataSelectionViewController()
+        cleanVC.onConfirmClean = { [weak self] options in
+            self?.performCleanData(options: options)
+        }
+        cleanVC.onOpenWebsiteDataManager = { [weak self] in
+            let manager = WebsiteDataManagerViewController()
+            let nav = UINavigationController(rootViewController: manager)
+            self?.present(nav, animated: true)
+        }
+        let nav = UINavigationController(rootViewController: cleanVC)
+        present(nav, animated: true)
+    }
 
-        alert.addAction(UIAlertAction(title: "清理网页缓存文件", style: .default) { [weak self] _ in
-            let cacheTypes = Set([WKWebsiteDataTypeFetchCache, WKWebsiteDataTypeDiskCache, WKWebsiteDataTypeMemoryCache])
-            WKWebsiteDataStore.default().removeData(ofTypes: cacheTypes, modifiedSince: .distantPast) {
-                self?.activeTab.webView.reload()
-            }
-        })
+    private func performCleanData(options: Set<CleanOption>) {
+        if options.contains(.cache) {
+            let cacheTypes = WKWebsiteDataStore.allWebsiteDataTypes()
+            WKWebsiteDataStore.default().removeData(ofTypes: cacheTypes, modifiedSince: .distantPast) {}
+        }
 
-        alert.addAction(UIAlertAction(title: "清理 Cookie 数据", style: .default) { [weak self] _ in
+        if options.contains(.cookies) {
             let store = WKWebsiteDataStore.default().httpCookieStore
             store.getAllCookies { cookies in
                 for cookie in cookies {
@@ -959,21 +989,19 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
                         store.delete(cookie)
                     }
                 }
-                self?.activeTab.webView.reload()
             }
-        })
+        }
 
-        alert.addAction(UIAlertAction(title: "清理搜索历史记录", style: .default) { _ in
+        if options.contains(.searchHistory) {
             SearchHistoryStore.shared.clearHistory()
-        })
+        }
 
-        alert.addAction(UIAlertAction(title: "管理网站数据", style: .default) { [weak self] _ in
-            let manager = WebsiteDataManagerViewController()
-            let nav = UINavigationController(rootViewController: manager)
-            self?.present(nav, animated: true)
-        })
+        if options.contains(.scriptData) {
+            ScriptDataStore.shared.clearAllScriptData()
+        }
 
-        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
-        present(alert, animated: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.activeTab.webView.reload()
+        }
     }
 }
