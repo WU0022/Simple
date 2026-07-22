@@ -172,6 +172,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         addressContainer.layer.shadowOpacity = 0.08
         addressContainer.layer.shadowRadius = 8
         addressContainer.layer.shadowOffset = CGSize(width: 0, height: 3)
+        addressContainer.clipsToBounds = true
 
         addressField.translatesAutoresizingMaskIntoConstraints = false
         addressField.delegate = self
@@ -238,8 +239,8 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         addressContainer.addSubview(addressField)
         addressContainer.addSubview(refreshButton)
         addressContainer.addSubview(clearButton)
+        addressContainer.addSubview(progressView)
 
-        bottomPanel.addSubview(progressView)
         bottomPanel.addSubview(addressContainer)
         bottomPanel.addSubview(navigationStack)
 
@@ -270,15 +271,15 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             bottomPanel.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             bottomPanelBottomConstraint!,
 
-            progressView.topAnchor.constraint(equalTo: bottomPanel.topAnchor),
-            progressView.leadingAnchor.constraint(equalTo: bottomPanel.leadingAnchor),
-            progressView.trailingAnchor.constraint(equalTo: bottomPanel.trailingAnchor),
-            progressView.heightAnchor.constraint(equalToConstant: 2),
-
-            addressContainer.topAnchor.constraint(equalTo: progressView.bottomAnchor, constant: 6),
+            addressContainer.topAnchor.constraint(equalTo: bottomPanel.topAnchor, constant: 6),
             addressContainer.leadingAnchor.constraint(equalTo: bottomPanel.leadingAnchor, constant: 14),
             addressContainer.trailingAnchor.constraint(equalTo: bottomPanel.trailingAnchor, constant: -14),
             addressContainer.heightAnchor.constraint(equalToConstant: 36),
+
+            progressView.leadingAnchor.constraint(equalTo: addressContainer.leadingAnchor),
+            progressView.trailingAnchor.constraint(equalTo: addressContainer.trailingAnchor),
+            progressView.bottomAnchor.constraint(equalTo: addressContainer.bottomAnchor),
+            progressView.heightAnchor.constraint(equalToConstant: 2),
 
             refreshButton.trailingAnchor.constraint(equalTo: addressContainer.trailingAnchor, constant: -8),
             refreshButton.centerYAnchor.constraint(equalTo: addressContainer.centerYAnchor),
@@ -460,7 +461,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         backButton.isEnabled = !isHome && activeTab.webView.canGoBack
         forwardButton.isEnabled = !isHome && activeTab.webView.canGoForward
-        moreButton.isEnabled = !isHome || isFullscreen
+        moreButton.isEnabled = true
         refreshButton.isEnabled = !isHome
 
         let refreshImage = activeTab.isLoading ? "xmark" : "arrow.clockwise"
@@ -510,7 +511,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         isFullscreen = enabled
         bottomPanel.isHidden = enabled
-        progressView.isHidden = enabled
 
         webTopSafeConstraint?.isActive = !enabled
         webTopFullscreenConstraint?.isActive = enabled
@@ -861,12 +861,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
                 }
 
                 self.setFullscreen(!self.isFullscreen)
-            }
-        )
-
-        alert.addAction(
-            UIAlertAction(title: "油猴脚本扩展", style: .default) { [weak self] _ in
-                self?.showPluginManager()
             }
         )
 
