@@ -151,6 +151,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     private let tabsButton = UIButton(type: .system)
     private let moreButton = UIButton(type: .system)
 
+    private var bottomPanelBottomConstraint: NSLayoutConstraint?
     private var progressObservation: NSKeyValueObservation?
 
     override var preferredStatusBarStyle: UIStatusBarStyle {
@@ -161,10 +162,12 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         super.viewDidLoad()
         configureInterface()
         configureKeyboardDismissal()
+        configureKeyboardObservers()
         createNewTab(loadURL: nil)
     }
 
     deinit {
+        NotificationCenter.default.removeObserver(self)
         progressObservation?.invalidate()
     }
 
@@ -174,8 +177,57 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         view.addGestureRecognizer(tap)
     }
 
+    private func configureKeyboardObservers() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(keyboardWillShow(_:)),
+            name: UIResponder.keyboardWillShowNotification,
+            object: nil
+        )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(keyboardWillHide(_:)),
+            name: UIResponder.keyboardWillHideNotification,
+            object: nil
+        )
+    }
+
     @objc private func dismissKeyboard() {
         view.endEditing(true)
+    }
+
+    @objc private func keyboardWillShow(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let keyboardFrame = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+              let duration = userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? TimeInterval else {
+            return
+        }
+
+        let curveValue = userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt ?? 7
+        let options = UIView.AnimationOptions(rawValue: curveValue << 16)
+
+        bottomPanelBottomConstraint?.constant = -keyboardFrame.height
+
+        UIView.animate(withDuration: duration, delay: 0, options: options) {
+            self.view.layoutIfNeeded()
+        }
+    }
+
+    @objc private func keyboardWillHide(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let duration = userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? TimeInterval else {
+            return
+        }
+
+        let curveValue = userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt ?? 7
+        let options = UIView.AnimationOptions(rawValue: curveValue << 16)
+
+        bottomPanelBottomConstraint?.constant = 0
+
+        UIView.animate(withDuration: duration, delay: 0, options: options) {
+            self.view.layoutIfNeeded()
+        }
     }
 
     private func configureInterface() {
@@ -193,12 +245,15 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         homeView.backgroundColor = .systemBackground
 
         bottomPanel.translatesAutoresizingMaskIntoConstraints = false
-        bottomPanel.backgroundColor = .systemBackground
+        bottomPanel.backgroundColor = .secondarySystemBackground
 
         addressContainer.translatesAutoresizingMaskIntoConstraints = false
-        addressContainer.backgroundColor = .secondarySystemBackground
+        addressContainer.backgroundColor = .white
         addressContainer.layer.cornerRadius = 20
-        addressContainer.clipsToBounds = true
+        addressContainer.layer.shadowColor = UIColor.black.cgColor
+        addressContainer.layer.shadowOpacity = 0.05
+        addressContainer.layer.shadowRadius = 6
+        addressContainer.layer.shadowOffset = CGSize(width: 0, height: 2)
 
         lockIconView.translatesAutoresizingMaskIntoConstraints = false
         lockIconView.image = UIImage(systemName: "lock.fill")
@@ -253,6 +308,8 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         view.addSubview(homeView)
         view.addSubview(bottomPanel)
 
+        bottomPanelBottomConstraint = bottomPanel.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+
         NSLayoutConstraint.activate([
             progressView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             progressView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -271,9 +328,9 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
             bottomPanel.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             bottomPanel.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            bottomPanel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+            bottomPanelBottomConstraint!,
 
-            addressContainer.topAnchor.constraint(equalTo: bottomPanel.topAnchor, constant: 6),
+            addressContainer.topAnchor.constraint(equalTo: bottomPanel.topAnchor, constant: 8),
             addressContainer.leadingAnchor.constraint(equalTo: bottomPanel.leadingAnchor, constant: 16),
             addressContainer.trailingAnchor.constraint(equalTo: bottomPanel.trailingAnchor, constant: -16),
             addressContainer.heightAnchor.constraint(equalToConstant: 40),
@@ -296,7 +353,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             navigationStack.topAnchor.constraint(equalTo: addressContainer.bottomAnchor, constant: 6),
             navigationStack.leadingAnchor.constraint(equalTo: bottomPanel.leadingAnchor, constant: 8),
             navigationStack.trailingAnchor.constraint(equalTo: bottomPanel.trailingAnchor, constant: -8),
-            navigationStack.bottomAnchor.constraint(equalTo: bottomPanel.bottomAnchor, constant: -2),
+            navigationStack.bottomAnchor.constraint(equalTo: bottomPanel.safeAreaLayoutGuide.bottomAnchor, constant: -2),
             navigationStack.heightAnchor.constraint(equalToConstant: 44)
         ])
     }
