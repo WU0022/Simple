@@ -1,5 +1,61 @@
 import UIKit
 
+final class CookieLockManagerViewController: UITableViewController {
+    private var lockedDomains: [String] = []
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        title = "Cookie 锁定保护列表"
+        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "LockCell")
+
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            title: "完成",
+            style: .done,
+            target: self,
+            action: #selector(handleDone)
+        )
+        loadData()
+    }
+
+    private func loadData() {
+        lockedDomains = CookieLockStore.shared.getLockedDomains()
+        tableView.reloadData()
+    }
+
+    @objc private func handleDone() {
+        dismiss(animated: true)
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        lockedDomains.count
+    }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "LockCell", for: indexPath)
+        let domain = lockedDomains[indexPath.row]
+
+        var content = cell.defaultContentConfiguration()
+        content.text = "🔒 " + domain
+        content.secondaryText = "在清理 Cookie 时将受到强保护不被删除"
+        cell.contentConfiguration = content
+
+        return cell
+    }
+
+    override func tableView(
+        _ tableView: UITableView,
+        commit editingStyle: UITableViewCell.EditingStyle,
+        forRowAt indexPath: IndexPath
+    ) {
+        if editingStyle == .delete {
+            let domain = lockedDomains[indexPath.row]
+            CookieLockStore.shared.toggleLock(domain: domain)
+            lockedDomains.remove(at: indexPath.row)
+            tableView.deleteRows(at: [indexPath], with: .automatic)
+        }
+    }
+}
+
 final class UserScriptManagerViewController: UITableViewController {
     private var scripts: [UserScript] = []
     var onScriptsUpdated: (() -> Void)?
