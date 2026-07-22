@@ -1,6 +1,62 @@
 import UIKit
 import WebKit
 
+struct UserScript: Codable {
+    var id: String
+    var name: String
+    var matchPattern: String
+    var code: String
+    var isEnabled: Bool
+}
+
+final class UserScriptStore {
+    static let shared = UserScriptStore()
+    private let key = "user_tampermonkey_scripts_v2"
+
+    private init() {}
+
+    func loadScripts() -> [UserScript] {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let scripts = try? JSONDecoder().decode([UserScript].self, from: data) else {
+            return []
+        }
+        return scripts
+    }
+
+    func saveScripts(_ scripts: [UserScript]) {
+        if let data = try? JSONEncoder().encode(scripts) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
+    func parseMetadata(from code: String) -> (name: String, match: String) {
+        var name = "未命名脚本"
+        var match = "*"
+
+        let lines = code.components(separatedBy: .newlines)
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.contains("@name") {
+                let parts = trimmed.components(separatedBy: "@name")
+                if parts.count > 1 {
+                    name = parts[1].trimmingCharacters(in: .whitespaces)
+                }
+            } else if trimmed.contains("@match") {
+                let parts = trimmed.components(separatedBy: "@match")
+                if parts.count > 1 {
+                    match = parts[1].trimmingCharacters(in: .whitespaces)
+                }
+            } else if trimmed.contains("@include") {
+                let parts = trimmed.components(separatedBy: "@include")
+                if parts.count > 1 {
+                    match = parts[1].trimmingCharacters(in: .whitespaces)
+                }
+            }
+        }
+        return (name, match)
+    }
+}
+
 @main
 final class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
@@ -71,15 +127,38 @@ final class TabItem: NSObject, WKNavigationDelegate {
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
 
         let userContentController = WKUserContentController()
-        let storedScripts = UserDefaults.standard.stringArray(forKey: "user_tampermonkey_scripts") ?? []
-        for scriptSource in storedScripts {
-            let script = WKUserScript(
-                source: scriptSource,
-                injectionTime: .atDocumentEnd,
-                forMainFrameOnly: false
+
+        let gmPolyfill = """
+        window.unsafeWindow = window;
+        window.GM_addStyle = function(css) {
+            var style = document.createElement('style');
+            style.type = 'text/css';
+            style.appendChild(document.createTextNode(css));
+            (document.head || document.documentElement).appendChild(style);
+            return style;
+        };
+        window.GM_setValue = function(name, value) {
+            localStorage.setItem('GM_' + name, JSON.stringify(value));
+        };
+        window.GM_getValue = function(name, defaultValue) {
+            var val = localStorage.getItem('GM_' + name);
+            return val ? JSON.parse(val) : defaultValue;
+        };
+        window.GM_log = function(msg) {
+            console.log('[Tampermonkey Log]', msg);
+        };
+        """
+        userContentController.addUserScript(
+            WKUserScript(source: gmPolyfill, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+        )
+
+        let scripts = UserScriptStore.shared.loadScripts()
+        for script in scripts where script.isEnabled {
+            userContentController.addUserScript(
+                WKUserScript(source: script.code, injectionTime: .atDocumentEnd, forMainFrameOnly: false)
             )
-            userContentController.addUserScript(script)
         }
+
         configuration.userContentController = userContentController
 
         webView = WKWebView(frame: .zero, configuration: configuration)
@@ -91,6 +170,41 @@ final class TabItem: NSObject, WKNavigationDelegate {
         webView.scrollView.contentInsetAdjustmentBehavior = .automatic
         webView.backgroundColor = .systemBackground
         webView.isOpaque = true
+    }
+
+    func reloadUserScripts() {
+        webView.configuration.userContentController.removeAllUserScripts()
+
+        let gmPolyfill = """
+        window.unsafeWindow = window;
+        window.GM_addStyle = function(css) {
+            var style = document.createElement('style');
+            style.type = 'text/css';
+            style.appendChild(document.createTextNode(css));
+            (document.head || document.documentElement).appendChild(style);
+            return style;
+        };
+        window.GM_setValue = function(name, value) {
+            localStorage.setItem('GM_' + name, JSON.stringify(value));
+        };
+        window.GM_getValue = function(name, defaultValue) {
+            var val = localStorage.getItem('GM_' + name);
+            return val ? JSON.parse(val) : defaultValue;
+        };
+        window.GM_log = function(msg) {
+            console.log('[Tampermonkey Log]', msg);
+        };
+        """
+        webView.configuration.userContentController.addUserScript(
+            WKUserScript(source: gmPolyfill, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+        )
+
+        let scripts = UserScriptStore.shared.loadScripts()
+        for script in scripts where script.isEnabled {
+            webView.configuration.userContentController.addUserScript(
+                WKUserScript(source: script.code, injectionTime: .atDocumentEnd, forMainFrameOnly: false)
+            )
+        }
     }
 
     func updateSnapshot(completion: (() -> Void)? = nil) {
@@ -824,40 +938,14 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
     @objc private func showPluginManager() {
         dismissKeyboard()
-
-        let alert = UIAlertController(
-            title: "油猴脚本扩展",
-            message: "请输入或粘贴自定义 JavaScript / 油猴脚本代码：",
-            preferredStyle: .alert
-        )
-
-        alert.addTextField { textField in
-            textField.placeholder = "粘贴 JavaScript / Tampermonkey 脚本"
+        let manager = UserScriptManagerViewController()
+        manager.onScriptsUpdated = { [weak self] in
+            self?.activeTab.reloadUserScripts()
+            self?.activeTab.webView.reload()
         }
-
-        alert.addAction(UIAlertAction(title: "保存扩展脚本", style: .default) { [weak self] _ in
-            guard let text = alert.textFields?.first?.text, !text.isEmpty else {
-                return
-            }
-
-            var scripts = UserDefaults.standard.stringArray(forKey: "user_tampermonkey_scripts") ?? []
-            scripts.append(text)
-            UserDefaults.standard.set(scripts, forKey: "user_tampermonkey_scripts")
-
-            let userScript = WKUserScript(source: text, injectionTime: .atDocumentEnd, forMainFrameOnly: false)
-            self?.activeTab.webView.configuration.userContentController.addUserScript(userScript)
-            self?.activeTab.webView.reload()
-        })
-
-        alert.addAction(UIAlertAction(title: "清空所有脚本", style: .destructive) { [weak self] _ in
-            UserDefaults.standard.removeObject(forKey: "user_tampermonkey_scripts")
-            self?.activeTab.webView.configuration.userContentController.removeAllUserScripts()
-            self?.activeTab.webView.reload()
-        })
-
-        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
-
-        present(alert, animated: true)
+        let nav = UINavigationController(rootViewController: manager)
+        nav.modalPresentationStyle = .pageSheet
+        present(nav, animated: true)
     }
 
     @objc private func showTabsManager() {
@@ -936,6 +1024,209 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         alert.addAction(UIAlertAction(title: "取消", style: .cancel))
         present(alert, animated: true)
+    }
+}
+
+final class UserScriptManagerViewController: UITableViewController {
+    private var scripts: [UserScript] = []
+    var onScriptsUpdated: (() -> Void)?
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        title = "油猴脚本扩展"
+        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "ScriptCell")
+
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            image: UIImage(systemName: "plus"),
+            style: .plain,
+            target: self,
+            action: #selector(handleAddScript)
+        )
+        navigationItem.leftBarButtonItem = UIBarButtonItem(
+            title: "完成",
+            style: .done,
+            target: self,
+            action: #selector(handleDone)
+        )
+
+        loadData()
+    }
+
+    private func loadData() {
+        scripts = UserScriptStore.shared.loadScripts()
+        tableView.reloadData()
+    }
+
+    @objc private func handleAddScript() {
+        let editor = UserScriptEditorViewController(script: nil)
+        editor.onSave = { [weak self] newScript in
+            self?.scripts.append(newScript)
+            UserScriptStore.shared.saveScripts(self?.scripts ?? [])
+            self?.tableView.reloadData()
+            self?.onScriptsUpdated?()
+        }
+        let nav = UINavigationController(rootViewController: editor)
+        present(nav, animated: true)
+    }
+
+    @objc private func handleDone() {
+        dismiss(animated: true)
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        scripts.count
+    }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "ScriptCell", for: indexPath)
+        let script = scripts[indexPath.row]
+
+        var content = cell.defaultContentConfiguration()
+        content.text = script.name
+        content.secondaryText = "匹配: \(script.matchPattern)"
+        cell.contentConfiguration = content
+
+        let toggle = UISwitch()
+        toggle.isOn = script.isEnabled
+        toggle.tag = indexPath.row
+        toggle.addTarget(self, action: #selector(handleToggle(_:)), for: .valueChanged)
+        cell.accessoryView = toggle
+
+        return cell
+    }
+
+    @objc private func handleToggle(_ sender: UISwitch) {
+        let index = sender.tag
+        scripts[index].isEnabled = sender.isOn
+        UserScriptStore.shared.saveScripts(scripts)
+        onScriptsUpdated?()
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        let script = scripts[indexPath.row]
+        let editor = UserScriptEditorViewController(script: script)
+        editor.onSave = { [weak self] updatedScript in
+            self?.scripts[indexPath.row] = updatedScript
+            UserScriptStore.shared.saveScripts(self?.scripts ?? [])
+            self?.tableView.reloadData()
+            self?.onScriptsUpdated?()
+        }
+        let nav = UINavigationController(rootViewController: editor)
+        present(nav, animated: true)
+    }
+
+    override func tableView(
+        _ tableView: UITableView,
+        commit editingStyle: UITableViewCell.EditingStyle,
+        forRowAt indexPath: IndexPath
+    ) {
+        if editingStyle == .delete {
+            scripts.remove(at: indexPath.row)
+            UserScriptStore.shared.saveScripts(scripts)
+            tableView.deleteRows(at: [indexPath], with: .automatic)
+            onScriptsUpdated?()
+        }
+    }
+}
+
+final class UserScriptEditorViewController: UIViewController {
+    private var script: UserScript?
+    var onSave: ((UserScript) -> Void)?
+
+    private let nameField = UITextField()
+    private let matchField = UITextField()
+    private let textView = UITextView()
+
+    init(script: UserScript?) {
+        self.script = script
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        title = script == nil ? "新建油猴脚本" : "编辑脚本"
+        view.backgroundColor = .systemBackground
+
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            title: "保存",
+            style: .done,
+            target: self,
+            action: #selector(handleSave)
+        )
+        navigationItem.leftBarButtonItem = UIBarButtonItem(
+            title: "取消",
+            style: .plain,
+            target: self,
+            action: #selector(handleCancel)
+        )
+
+        nameField.translatesAutoresizingMaskIntoConstraints = false
+        nameField.borderStyle = .roundedRect
+        nameField.placeholder = "脚本名称"
+        nameField.text = script?.name ?? ""
+
+        matchField.translatesAutoresizingMaskIntoConstraints = false
+        matchField.borderStyle = .roundedRect
+        matchField.placeholder = "匹配域名规则 (如 * 或 google.com)"
+        matchField.text = script?.matchPattern ?? "*"
+
+        textView.translatesAutoresizingMaskIntoConstraints = false
+        textView.layer.borderWidth = 0.5
+        textView.layer.borderColor = UIColor.separator.cgColor
+        textView.layer.cornerRadius = 8
+        textView.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+        textView.autocapitalizationType = .none
+        textView.autocorrectionType = .no
+        textView.text = script?.code ?? "// ==UserScript==\n// @name         自定义油猴脚本\n// @match        *\n// ==/UserScript==\n\n(function() {\n    'use strict';
+    // 在此处编写 JS 代码\n})();"
+
+        view.addSubview(nameField)
+        view.addSubview(matchField)
+        view.addSubview(textView)
+
+        NSLayoutConstraint.activate([
+            nameField.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
+            nameField.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            nameField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            nameField.heightAnchor.constraint(equalToConstant: 38),
+
+            matchField.topAnchor.constraint(equalTo: nameField.bottomAnchor, constant: 8),
+            matchField.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            matchField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            matchField.heightAnchor.constraint(equalToConstant: 38),
+
+            textView.topAnchor.constraint(equalTo: matchField.bottomAnchor, constant: 12),
+            textView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            textView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            textView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12)
+        ])
+    }
+
+    @objc private func handleSave() {
+        let codeText = textView.text ?? ""
+        var nameText = nameField.text?.trimmingCharacters(in: .whitespaces) ?? ""
+        var matchText = matchField.text?.trimmingCharacters(in: .whitespaces) ?? ""
+
+        let parsed = UserScriptStore.shared.parseMetadata(from: codeText)
+        if nameText.isEmpty { nameText = parsed.name }
+        if matchText.isEmpty { matchText = parsed.match }
+
+        let item = UserScript(
+            id: script?.id ?? UUID().uuidString,
+            name: nameText,
+            matchPattern: matchText,
+            code: codeText,
+            isEnabled: script?.isEnabled ?? true
+        )
+
+        onSave?(item)
+        dismiss(animated: true)
+    }
+
+    @objc private func handleCancel() {
+        dismiss(animated: true)
     }
 }
 
