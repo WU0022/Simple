@@ -128,26 +128,7 @@ final class TabItem: NSObject, WKNavigationDelegate {
 
         let userContentController = WKUserContentController()
 
-        let gmPolyfill = """
-        window.unsafeWindow = window;
-        window.GM_addStyle = function(css) {
-            var style = document.createElement('style');
-            style.type = 'text/css';
-            style.appendChild(document.createTextNode(css));
-            (document.head || document.documentElement).appendChild(style);
-            return style;
-        };
-        window.GM_setValue = function(name, value) {
-            localStorage.setItem('GM_' + name, JSON.stringify(value));
-        };
-        window.GM_getValue = function(name, defaultValue) {
-            var val = localStorage.getItem('GM_' + name);
-            return val ? JSON.parse(val) : defaultValue;
-        };
-        window.GM_log = function(msg) {
-            console.log('[Tampermonkey Log]', msg);
-        };
-        """
+        let gmPolyfill = "window.unsafeWindow = window; window.GM_addStyle = function(css) { var style = document.createElement('style'); style.type = 'text/css'; style.appendChild(document.createTextNode(css)); (document.head || document.documentElement).appendChild(style); return style; }; window.GM_setValue = function(name, value) { localStorage.setItem('GM_' + name, JSON.stringify(value)); }; window.GM_getValue = function(name, defaultValue) { var val = localStorage.getItem('GM_' + name); return val ? JSON.parse(val) : defaultValue; }; window.GM_log = function(msg) { console.log('[Tampermonkey Log]', msg); };"
         userContentController.addUserScript(
             WKUserScript(source: gmPolyfill, injectionTime: .atDocumentStart, forMainFrameOnly: false)
         )
@@ -175,26 +156,7 @@ final class TabItem: NSObject, WKNavigationDelegate {
     func reloadUserScripts() {
         webView.configuration.userContentController.removeAllUserScripts()
 
-        let gmPolyfill = """
-        window.unsafeWindow = window;
-        window.GM_addStyle = function(css) {
-            var style = document.createElement('style');
-            style.type = 'text/css';
-            style.appendChild(document.createTextNode(css));
-            (document.head || document.documentElement).appendChild(style);
-            return style;
-        };
-        window.GM_setValue = function(name, value) {
-            localStorage.setItem('GM_' + name, JSON.stringify(value));
-        };
-        window.GM_getValue = function(name, defaultValue) {
-            var val = localStorage.getItem('GM_' + name);
-            return val ? JSON.parse(val) : defaultValue;
-        };
-        window.GM_log = function(msg) {
-            console.log('[Tampermonkey Log]', msg);
-        };
-        """
+        let gmPolyfill = "window.unsafeWindow = window; window.GM_addStyle = function(css) { var style = document.createElement('style'); style.type = 'text/css'; style.appendChild(document.createTextNode(css)); (document.head || document.documentElement).appendChild(style); return style; }; window.GM_setValue = function(name, value) { localStorage.setItem('GM_' + name, JSON.stringify(value)); }; window.GM_getValue = function(name, defaultValue) { var val = localStorage.getItem('GM_' + name); return val ? JSON.parse(val) : defaultValue; }; window.GM_log = function(msg) { console.log('[Tampermonkey Log]', msg); };"
         webView.configuration.userContentController.addUserScript(
             WKUserScript(source: gmPolyfill, injectionTime: .atDocumentStart, forMainFrameOnly: false)
         )
@@ -1179,8 +1141,7 @@ final class UserScriptEditorViewController: UIViewController {
         textView.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
         textView.autocapitalizationType = .none
         textView.autocorrectionType = .no
-        textView.text = script?.code ?? "// ==UserScript==\n// @name         自定义油猴脚本\n// @match        *\n// ==/UserScript==\n\n(function() {\n    'use strict';
-    // 在此处编写 JS 代码\n})();"
+        textView.text = script?.code ?? "// ==UserScript==\n// @name         自定义油猴脚本\n// @match        *\n// ==/UserScript==\n\n(function() {\n    'use strict';\n})();"
 
         view.addSubview(nameField)
         view.addSubview(matchField)
@@ -1430,7 +1391,7 @@ final class TabGridCell: UICollectionViewCell {
             headerView.heightAnchor.constraint(equalToConstant: 34),
 
             titleLabel.leadingAnchor.constraint(equalTo: headerView.leadingAnchor, constant: 10),
-            titleLabel.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -6),
+            titleLabel.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -4),
             titleLabel.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
 
             closeButton.trailingAnchor.constraint(equalTo: headerView.trailingAnchor, constant: -7),
