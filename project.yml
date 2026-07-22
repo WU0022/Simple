@@ -10,7 +10,7 @@ targets:
     platform: iOS
     deploymentTarget: "15.0"
     sources:
-      - path: App.swift
+      - path: Sources
       - path: Resources
       - path: Assets.xcassets
     settings:
