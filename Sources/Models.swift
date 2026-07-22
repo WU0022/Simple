@@ -9,39 +9,94 @@ struct UserScript: Codable {
     var isEnabled: Bool
 }
 
-enum UserAgentMode: String, CaseIterable {
-    case mobileSafari = "iPhone (Safari)"
-    case mobileChrome = "iPhone (Chrome)"
-    case desktop = "电脑版 (Mac Chrome)"
-
-    var userAgentString: String {
-        switch self {
-        case .mobileSafari:
-            return "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/605.1.15"
-        case .mobileChrome:
-            return "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/125.0.6422.80 Mobile/15E148 Safari/604.1"
-        case .desktop:
-            return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
-        }
-    }
+struct UserAgentItem: Codable, Equatable {
+    var id: String
+    var name: String
+    var uaString: String
+    var isCustom: Bool
 }
 
 final class UserAgentStore {
     static let shared = UserAgentStore()
-    private let key = "browser_user_agent_mode_v1"
+    private let keyCustomItems = "browser_ua_custom_items_v3"
+    private let keySelectedId = "browser_ua_selected_id_v3"
+
+    private let defaultItems: [UserAgentItem] = [
+        UserAgentItem(
+            id: "default_safari",
+            name: "iPhone",
+            uaString: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/605.1.15",
+            isCustom: false
+        ),
+        UserAgentItem(
+            id: "default_chrome",
+            name: "iPhone Chrome",
+            uaString: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/125.0.6422.80 Mobile/15E148 Safari/604.1",
+            isCustom: false
+        ),
+        UserAgentItem(
+            id: "default_mac",
+            name: "macOS Chrome",
+            uaString: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            isCustom: false
+        )
+    ]
 
     private init() {}
 
-    func getMode() -> UserAgentMode {
-        guard let raw = UserDefaults.standard.string(forKey: key),
-              let mode = UserAgentMode(rawValue: raw) else {
-            return .mobileSafari
+    func loadAllItems() -> [UserAgentItem] {
+        var items = defaultItems
+        if let data = UserDefaults.standard.data(forKey: keyCustomItems),
+           let customs = try? JSONDecoder().decode([UserAgentItem].self, from: data) {
+            items.append(contentsOf: customs)
         }
-        return mode
+        return items
     }
 
-    func setMode(_ mode: UserAgentMode) {
-        UserDefaults.standard.set(mode.rawValue, forKey: key)
+    func addCustomItem(name: String, uaString: String) {
+        var customs: [UserAgentItem] = []
+        if let data = UserDefaults.standard.data(forKey: keyCustomItems),
+           let decoded = try? JSONDecoder().decode([UserAgentItem].self, from: data) {
+            customs = decoded
+        }
+        let newItem = UserAgentItem(id: UUID().uuidString, name: name, uaString: uaString, isCustom: true)
+        customs.append(newItem)
+        if let data = try? JSONEncoder().encode(customs) {
+            UserDefaults.standard.set(data, forKey: keyCustomItems)
+        }
+    }
+
+    func deleteCustomItem(id: String) {
+        if let data = UserDefaults.standard.data(forKey: keyCustomItems),
+           var customs = try? JSONDecoder().decode([UserAgentItem].self, from: data) {
+            customs.removeAll { $0.id == id }
+            if let data = try? JSONEncoder().encode(customs) {
+                UserDefaults.standard.set(data, forKey: keyCustomItems)
+            }
+        }
+        if getSelectedId() == id {
+            setSelectedId(defaultItems[0].id)
+        }
+    }
+
+    func getSelectedId() -> String {
+        return UserDefaults.standard.string(forKey: keySelectedId) ?? defaultItems[0].id
+    }
+
+    func setSelectedId(_ id: String) {
+        UserDefaults.standard.set(id, forKey: keySelectedId)
+    }
+
+    func getSelectedUA() -> String {
+        let all = loadAllItems()
+        let selId = getSelectedId()
+        return all.first { $0.id == selId }?.uaString ?? defaultItems[0].uaString
+    }
+
+    func getSelectedItem() -> UserAgentItem {
+        let all = loadAllItems()
+        let selId = getSelectedId()
+        return all.first { $0.id == selId } ?? defaultItems[0]
     }
 }
 
@@ -330,8 +385,7 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         webView = WKWebView(frame: .zero, configuration: configuration)
         super.init()
 
-        let mode = UserAgentStore.shared.getMode()
-        webView.customUserAgent = mode.userAgentString
+        webView.customUserAgent = UserAgentStore.shared.getSelectedUA()
 
         userContentController.add(self, name: "GM")
 
