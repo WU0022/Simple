@@ -7,6 +7,7 @@ struct UserScript: Codable {
     var matchPattern: String
     var code: String
     var isEnabled: Bool
+    var iconURL: String?
 }
 
 struct UserAgentItem: Codable, Equatable {
@@ -278,9 +279,10 @@ final class UserScriptStore {
         }
     }
 
-    func parseMetadata(from code: String) -> (name: String, match: String) {
+    func parseMetadata(from code: String) -> (name: String, match: String, iconURL: String?) {
         var nameMap: [String: String] = [:]
         var matches: [String] = []
+        var iconURL: String?
 
         let lines = code.components(separatedBy: .newlines)
         for line in lines {
@@ -299,13 +301,17 @@ final class UserScriptStore {
                 nameMap[tag] = val
             } else if tag == "@match" || tag == "@include" {
                 matches.append(val)
+            } else if tag == "@icon" || tag == "@iconURL" || tag == "@icon64" || tag == "@icon64URL" || tag == "@defaulticon" {
+                if iconURL == nil {
+                    iconURL = val
+                }
             }
         }
 
         let preferredName = nameMap["@name:zh-CN"] ?? nameMap["@name:zh"] ?? nameMap["@name:zh-TW"] ?? nameMap["@name"] ?? "未命名脚本"
         let preferredMatch = matches.first ?? "*"
 
-        return (preferredName, preferredMatch)
+        return (preferredName, preferredMatch, iconURL)
     }
 
     func isScriptMatching(script: UserScript, urlString: String) -> Bool {
