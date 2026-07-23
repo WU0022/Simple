@@ -48,9 +48,9 @@ final class WebsiteDataManagerViewController: UITableViewController, UISearchRes
     }
 
     @objc private func handleCleanAllCaches() {
-        let alert = UIAlertController(title: "清理所有临时缓存", message: "将清理网页缓存文件，受保护网站的登录与本地数据将被保留。", preferredStyle: .actionSheet)
-        alert.addAction(UIAlertAction(title: "清理缓存", style: .default) { [weak self] _ in
-            WebsiteCleaner.shared.cleanCacheOnly {
+        let alert = UIAlertController(title: "清理未锁定网站数据", message: "将清理所有未锁定网站的缓存与本地数据，受保护(🔒)网站的数据将被保留。", preferredStyle: .actionSheet)
+        alert.addAction(UIAlertAction(title: "清理未锁定数据", style: .default) { [weak self] _ in
+            WebsiteCleaner.shared.cleanUnprotectedLoginAndData {
                 self?.loadData()
             }
         })
@@ -350,17 +350,25 @@ final class UserScriptEditorViewController: UIViewController {
         nameField.backgroundColor = .secondarySystemGroupedBackground
         nameField.layer.cornerRadius = 10
         nameField.clipsToBounds = true
-        nameField.placeholder = " 脚本名称"
+        nameField.placeholder = "脚本名称"
         nameField.text = script?.name ?? ""
         nameField.font = .systemFont(ofSize: 15)
+
+        let namePadding = UIView(frame: CGRect(x: 0, y: 0, width: 14, height: 1))
+        nameField.leftView = namePadding
+        nameField.leftViewMode = .always
 
         matchField.translatesAutoresizingMaskIntoConstraints = false
         matchField.backgroundColor = .secondarySystemGroupedBackground
         matchField.layer.cornerRadius = 10
         matchField.clipsToBounds = true
-        matchField.placeholder = " 匹配域名规则 (如 * 或 google.com)"
+        matchField.placeholder = "匹配域名规则 (如 * 或 google.com)"
         matchField.text = script?.matchPattern ?? "*"
         matchField.font = .systemFont(ofSize: 15)
+
+        let matchPadding = UIView(frame: CGRect(x: 0, y: 0, width: 14, height: 1))
+        matchField.leftView = matchPadding
+        matchField.leftViewMode = .always
 
         textView.translatesAutoresizingMaskIntoConstraints = false
         textView.backgroundColor = .secondarySystemGroupedBackground
