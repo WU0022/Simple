@@ -440,6 +440,7 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
     var previousURL: URL?
 
     private var hasInjectedScriptsForCurrentPage = false
+    private var isLoadingFailureDocument = false
     private var navigationActionURL: URL?
     weak var delegate: TabItemDelegate?
 
@@ -709,6 +710,7 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         guard nsError.domain != "WebKitErrorDomain" && nsError.code != NSURLErrorCancelled && nsError.code != 102 else { return }
 
         isDisplayingFailurePage = true
+        isLoadingFailureDocument = true
         failedURL = targetURL ?? webView.url
         url = failedURL
         title = "无法连接服务器"
@@ -733,13 +735,13 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
         <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f8f9fa; color: #212529; margin: 0; padding: 60px 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 60vh; text-align: center; }
-            h1 { font-size: 22px; font-weight: 600; margin: 0 0 12px 0; color: #1a1a1a; }
-            p { font-size: 14px; color: #6c757d; margin: 0 0 16px 0; max-width: 320px; line-height: 1.5; }
-            .url-box { font-size: 13px; color: #adb5bd; word-break: break-all; margin-bottom: 32px; max-width: 300px; }
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f5f5f7; color: #1c1c1e; margin: 0; padding: 60px 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 60vh; text-align: center; }
+            h1 { font-size: 20px; font-weight: 600; margin: 0 0 10px 0; color: #1c1c1e; }
+            p { font-size: 14px; color: #8e8e93; margin: 0 0 16px 0; max-width: 320px; line-height: 1.4; }
+            .url-box { font-size: 13px; color: #aeaeb2; word-break: break-all; margin-bottom: 28px; max-width: 300px; }
             .btn-group { display: flex; gap: 12px; }
-            .btn { background-color: #ffffff; color: #495057; border: 1px solid #ced4da; padding: 10px 24px; font-size: 14px; font-weight: 500; border-radius: 8px; cursor: pointer; display: inline-block; -webkit-tap-highlight-color: transparent; }
-            .btn-primary { background-color: #007aff; color: #ffffff; border: none; }
+            .btn { background-color: #ffffff; color: #1c1c1e; border: none; padding: 10px 24px; font-size: 14px; font-weight: 500; border-radius: 12px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.06); display: inline-block; -webkit-tap-highlight-color: transparent; }
+            .btn-primary { background-color: #007aff; color: #ffffff; }
             .btn:active { opacity: 0.7; }
         </style>
         </head>
@@ -755,6 +757,9 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         </html>
         """
         webView.loadHTMLString(html, baseURL: failedURL)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            self?.isLoadingFailureDocument = false
+        }
     }
 
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
@@ -766,20 +771,22 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         isLoading = true
-        isDisplayingFailurePage = false
+        if !isLoadingFailureDocument {
+            isDisplayingFailurePage = false
+        }
         hasInjectedScriptsForCurrentPage = false
         registeredCommands.removeAll()
         delegate?.tabDidUpdate(self)
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        if let currentURL = webView.url, !currentURL.absoluteString.contains("about:blank") {
+        if !isDisplayingFailurePage, let currentURL = webView.url, !currentURL.absoluteString.contains("about:blank") {
             if previousURL != currentURL {
                 previousURL = url
             }
             url = currentURL
+            title = webView.title ?? url?.host ?? "新标签页"
         }
-        title = webView.title ?? url?.host ?? "新标签页"
         if !hasInjectedScriptsForCurrentPage {
             hasInjectedScriptsForCurrentPage = true
             injectAndRunUserScripts()
@@ -812,7 +819,8 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         withError error: Error
     ) {
         isLoading = false
-        loadErrorPage(for: webView.url ?? navigationActionURL, error: error)
+        let targetURL = navigationActionURL ?? webView.url
+        loadErrorPage(for: targetURL, error: error)
         delegate?.tabDidFail(self, error: error)
     }
 
@@ -822,7 +830,8 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         withError error: Error
     ) {
         isLoading = false
-        loadErrorPage(for: webView.url ?? navigationActionURL, error: error)
+        let targetURL = navigationActionURL ?? webView.url
+        loadErrorPage(for: targetURL, error: error)
         delegate?.tabDidFail(self, error: error)
     }
 
