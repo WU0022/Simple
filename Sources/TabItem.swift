@@ -43,6 +43,42 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         configuration.defaultWebpagePreferences.preferredContentMode = isDesktop ? .desktop : .mobile
 
         let userContentController = WKUserContentController()
+
+        if isDesktop {
+            let desktopScriptSource = """
+            (function() {
+                try {
+                    var meta = document.querySelector('meta[name="viewport"]');
+                    if (!meta) {
+                        meta = document.createElement('meta');
+                        meta.name = 'viewport';
+                        (document.head || document.documentElement || document).appendChild(meta);
+                    }
+                    var screenW = window.screen.width || 390;
+                    var targetW = 1024;
+                    var scale = (screenW / targetW).toFixed(2);
+                    meta.content = 'width=' + targetW + ', initial-scale=' + scale + ', minimum-scale=0.1, maximum-scale=5.0, user-scalable=yes';
+
+                    var styleId = '__desktop_overflow_fix__';
+                    if (!document.getElementById(styleId)) {
+                        var style = document.createElement('style');
+                        style.id = styleId;
+                        style.type = 'text/css';
+                        style.innerHTML = `
+                            html, body { max-width: 100vw !important; overflow-x: auto !important; }
+                            img, video, iframe, object, embed, canvas, table, svg { max-width: 100% !important; height: auto !important; }
+                            div, section, article, main, aside, header, footer { max-width: 100vw !important; box-sizing: border-box !important; }
+                            .player-container, #player, .video-player, .html5-video-player { max-width: 100% !important; }
+                        `;
+                        (document.head || document.documentElement || document).appendChild(style);
+                    }
+                } catch(e) {}
+            })();
+            """
+            let userScript = WKUserScript(source: desktopScriptSource, injectionTime: .atDocumentStart, forMainFrameOnly: true)
+            userContentController.addUserScript(userScript)
+        }
+
         configuration.userContentController = userContentController
 
         webView = WKWebView(frame: .zero, configuration: configuration)
@@ -158,7 +194,7 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
                 if (!meta) {
                     meta = document.createElement('meta');
                     meta.name = 'viewport';
-                    (document.head || document.documentElement).appendChild(meta);
+                    (document.head || document.documentElement || document).appendChild(meta);
                 }
                 var screenW = window.screen.width || 390;
                 var targetW = 1024;
@@ -171,12 +207,12 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
                     style.id = styleId;
                     style.type = 'text/css';
                     style.innerHTML = `
-                        html { overflow-x: auto !important; }
-                        body { max-width: 100% !important; overflow-x: auto !important; }
-                        video, iframe, object, embed { max-width: 100% !important; }
+                        html, body { max-width: 100vw !important; overflow-x: auto !important; }
+                        img, video, iframe, object, embed, canvas, table, svg { max-width: 100% !important; height: auto !important; }
+                        div, section, article, main, aside, header, footer { max-width: 100vw !important; box-sizing: border-box !important; }
                         .player-container, #player, .video-player, .html5-video-player { max-width: 100% !important; }
                     `;
-                    (document.head || document.documentElement).appendChild(style);
+                    (document.head || document.documentElement || document).appendChild(style);
                 }
             } catch(e) {}
         })();
