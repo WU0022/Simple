@@ -23,6 +23,7 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
     var failureError: Error?
     var isDisplayingFailurePage = false
     var previousURL: URL?
+    var failureOriginURL: URL?
 
     private var hasInjectedScriptsForCurrentPage = false
     private var isLoadingFailureDocument = false
@@ -88,6 +89,7 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         isDisplayingFailurePage = false
         failedURL = nil
         failureError = nil
+        failureOriginURL = nil
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -408,13 +410,18 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
 
         navigationActionURL = targetURL
 
+        let scheme = targetURL.scheme?.lowercased() ?? ""
+        if ["http", "https"].contains(scheme),
+           navigationAction.targetFrame != nil,
+           targetURL != url {
+            failureOriginURL = url
+        }
+
         if targetURL.path.hasSuffix(".user.js") || targetURL.absoluteString.hasSuffix(".user.js") {
             decisionHandler(.cancel)
             NotificationCenter.default.post(name: NSNotification.Name("InstallUserScriptNotification"), object: targetURL)
             return
         }
-
-        let scheme = targetURL.scheme?.lowercased() ?? ""
 
         if ["http", "https", "about", "data", "blob"].contains(scheme) {
             if navigationAction.targetFrame == nil {
