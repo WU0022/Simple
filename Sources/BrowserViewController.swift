@@ -918,61 +918,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         view.endEditing(true)
     }
 
-    @objc private func keyboardWillChangeFrame(_ notification: Notification) {
-        guard addressField.isFirstResponder else {
-            if bottomPanelBottomConstraint?.constant != 0 {
-                bottomPanelBottomConstraint?.constant = 0
-                view.layoutIfNeeded()
-            }
-            return
-        }
-
-        guard !isFullscreen,
-              let userInfo = notification.userInfo,
-              let keyboardFrame = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
-              let duration = userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? TimeInterval else {
-            return
-        }
-
-        let frameInView = view.convert(keyboardFrame, from: nil)
-        let overlap = max(0, view.bounds.maxY - frameInView.minY)
-
-        let curve = userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt ?? 7
-        let options = UIView.AnimationOptions(rawValue: curve << 16)
-
-        bottomPanelBottomConstraint?.constant = -overlap
-
-        UIView.animate(withDuration: duration, delay: 0, options: options) {
-            self.view.layoutIfNeeded()
-        }
-    }
-
-    @objc private func keyboardWillHide(_ notification: Notification) {
-        guard addressField.isFirstResponder else {
-            if bottomPanelBottomConstraint?.constant != 0 {
-                bottomPanelBottomConstraint?.constant = 0
-                view.layoutIfNeeded()
-            }
-            return
-        }
-
-        guard let userInfo = notification.userInfo,
-              let duration = userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? TimeInterval else {
-            bottomPanelBottomConstraint?.constant = 0
-            view.layoutIfNeeded()
-            return
-        }
-
-        let curve = userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt ?? 7
-        let options = UIView.AnimationOptions(rawValue: curve << 16)
-
-        bottomPanelBottomConstraint?.constant = 0
-
-        UIView.animate(withDuration: duration, delay: 0, options: options) {
-            self.view.layoutIfNeeded()
-        }
-    }
-
     @objc private func handleFullscreenExitGesture(_ gesture: UILongPressGestureRecognizer) {
         guard isFullscreen, gesture.state == .began else {
             return
