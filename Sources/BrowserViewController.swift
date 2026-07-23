@@ -489,7 +489,9 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         progressObservation = webView.observe(\.estimatedProgress, options: [.new]) { [weak self] observedWebView, _ in
             DispatchQueue.main.async {
-                guard let self, observedWebView.isLoading else {
+                guard let self = self, observedWebView.isLoading, self.homeView.alpha < 0.5 else {
+                    self?.progressView.alpha = 0
+                    self?.progressView.setProgress(0, animated: false)
                     return
                 }
 
@@ -511,6 +513,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         addressField.text = ""
         addressField.resignFirstResponder()
         progressView.alpha = 0
+        progressView.setProgress(0, animated: false)
         updateUIState()
     }
 
@@ -623,19 +626,12 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             addressField.text = url.host ?? url.absoluteString
         }
 
-        updateUIState()
-
         if !tab.isLoading {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-                guard let self, !self.activeTab.isLoading else {
-                    return
-                }
-
-                UIView.animate(withDuration: 0.2) {
-                    self.progressView.alpha = 0
-                }
-            }
+            progressView.alpha = 0
+            progressView.setProgress(0, animated: false)
         }
+
+        updateUIState()
     }
 
     func tabDidFail(_ tab: TabItem, error: Error) {
@@ -643,6 +639,8 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             return
         }
 
+        progressView.alpha = 0
+        progressView.setProgress(0, animated: false)
         updateUIState()
     }
 
@@ -848,18 +846,13 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         if matchingScripts.isEmpty {
             items.append(CustomBottomSheetItem(
-                iconName: "info.circle",
-                title: "当前页面未匹配到已启用的脚本",
-                subtitle: "可以在 GreasyFork 上查找可用脚本",
+                title: "未匹配到任何脚本",
                 handler: nil
             ))
         } else {
             for script in matchingScripts {
-                let statusIcon = script.isEnabled ? "checkmark.circle.fill" : "circle"
                 items.append(CustomBottomSheetItem(
-                    iconName: statusIcon,
                     title: script.name,
-                    subtitle: script.isEnabled ? "已启用的油猴脚本" : "已禁用",
                     handler: { [weak self] in
                         self?.showScriptSubMenu(for: script)
                     }
@@ -868,9 +861,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         }
 
         items.append(CustomBottomSheetItem(
-            iconName: "magnifyingglass",
             title: "搜索适合当前网站的脚本",
-            subtitle: "打开 GreasyFork 搜索符合主机的扩展",
             handler: { [weak self] in
                 let searchUrlStr = "https://greasyfork.org/zh-CN/scripts?q=\(currentHost)"
                 if let searchUrl = URL(string: searchUrlStr) {
@@ -880,15 +871,13 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         ))
 
         items.append(CustomBottomSheetItem(
-            iconName: "gearshape",
             title: "用户脚本管理",
-            subtitle: "查看与配置全局油猴脚本列表",
             handler: { [weak self] in
                 self?.showPluginManager()
             }
         ))
 
-        let panel = CustomBottomSheetViewController(title: "正在运行的脚本", subtitle: currentHost, items: items)
+        let panel = CustomBottomSheetViewController(title: "正在运行的脚本", items: items)
         let nav = UINavigationController(rootViewController: panel)
         if #available(iOS 15.0, *) {
             if let presentation = nav.sheetPresentationController {
@@ -904,9 +893,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         let scriptCmds = activeTab.registeredCommands.filter { $0.scriptId == script.id }
         for cmd in scriptCmds {
             items.append(CustomBottomSheetItem(
-                iconName: "gear",
                 title: cmd.caption,
-                subtitle: "脚本触发菜单指令",
                 handler: { [weak self] in
                     self?.activeTab.webView.evaluateJavaScript("window.__gm_invokeMenuCommand(\(cmd.cmdId))", completionHandler: nil)
                 }
@@ -914,9 +901,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         }
 
         items.append(CustomBottomSheetItem(
-            iconName: script.isEnabled ? "pause.circle" : "play.circle",
             title: script.isEnabled ? "禁用该脚本" : "启用该脚本",
-            subtitle: "针对所有域名生效的开关状态",
             handler: { [weak self] in
                 var scripts = UserScriptStore.shared.loadScripts()
                 if let idx = scripts.firstIndex(where: { $0.id == script.id }) {
@@ -928,9 +913,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         ))
 
         items.append(CustomBottomSheetItem(
-            iconName: "trash",
-            title: "清除该脚本缓存数据",
-            subtitle: "重置该脚本在沙箱中保存的数据",
+            title: "清除脚本缓存数据",
             isDestructive: true,
             handler: {
                 ScriptDataStore.shared.clearDataForScript(scriptId: script.id)
@@ -938,9 +921,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         ))
 
         items.append(CustomBottomSheetItem(
-            iconName: "square.and.pencil",
             title: "编辑脚本代码",
-            subtitle: "自定义源代码及匹配元规则",
             handler: { [weak self] in
                 let editor = UserScriptEditorViewController(script: script)
                 editor.onSave = { updatedScript in
@@ -956,7 +937,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             }
         ))
 
-        let panel = CustomBottomSheetViewController(title: script.name, subtitle: "脚本规则控制", items: items)
+        let panel = CustomBottomSheetViewController(title: script.name, items: items)
         let nav = UINavigationController(rootViewController: panel)
         if #available(iOS 15.0, *) {
             if let presentation = nav.sheetPresentationController {
@@ -1014,9 +995,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         var items: [CustomBottomSheetItem] = []
 
         items.append(CustomBottomSheetItem(
-            iconName: isFullscreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
             title: isFullscreen ? "退出全屏浏览" : "全屏浏览",
-            subtitle: "切换导航与工具栏显示状态",
             handler: { [weak self] in
                 guard let self = self else { return }
                 self.setFullscreen(!self.isFullscreen)
@@ -1025,9 +1004,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         let isEyeOn = EyeProtectionManager.shared.isEnabled
         items.append(CustomBottomSheetItem(
-            iconName: isEyeOn ? "eye.slash.fill" : "eye.fill",
             title: isEyeOn ? "关闭护眼模式" : "开启护眼模式",
-            subtitle: "降低屏幕高亮遮罩对眼睛的刺激",
             handler: { [weak self] in
                 EyeProtectionManager.shared.toggle(in: self?.view.window)
             }
@@ -1035,9 +1012,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         let currentUAItem = UserAgentStore.shared.getSelectedItem()
         items.append(CustomBottomSheetItem(
-            iconName: "network",
             title: "浏览器标识: \(currentUAItem.name)",
-            subtitle: "修改网页端识别的 User-Agent",
             handler: { [weak self] in
                 self?.showUserAgentManager()
             }
@@ -1045,9 +1020,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         let isDesktop = currentUAItem.id == "default_mac"
         items.append(CustomBottomSheetItem(
-            iconName: isDesktop ? "iphone" : "desktopcomputer",
             title: isDesktop ? "切换为移动版网页" : "切换为电脑版网页",
-            subtitle: "修改请求头并重载当前标签",
             handler: { [weak self] in
                 let targetId = isDesktop ? "default_safari" : "default_mac"
                 UserAgentStore.shared.setSelectedId(targetId)
@@ -1058,16 +1031,14 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         ))
 
         items.append(CustomBottomSheetItem(
-            iconName: "trash",
             title: "清除数据与管理网站",
-            subtitle: "清理临时缓存文件或保护的重要本地数据",
             isDestructive: true,
             handler: { [weak self] in
                 self?.showCleanDataMenu()
             }
         ))
 
-        let panel = CustomBottomSheetViewController(title: "浏览器工具", subtitle: nil, items: items)
+        let panel = CustomBottomSheetViewController(title: "浏览器选项", items: items)
         let nav = UINavigationController(rootViewController: panel)
         if #available(iOS 15.0, *) {
             if let presentation = nav.sheetPresentationController {
