@@ -110,7 +110,7 @@ final class CleanDataSelectionViewController: UIViewController, UITableViewDataS
             let isChecked = selectedOptions.contains(option)
             cell.configure(title: titleText, isChecked: isChecked, isActionButton: false)
         } else if indexPath.section == 1 {
-            cell.configure(title: "确认清理", isChecked: false, isActionButton: true, textColor: .label)
+            cell.configure(title: "确认清理", isChecked: false, isActionButton: true, textColor: .systemBlue)
         } else {
             cell.configure(title: "管理网站数据", isChecked: false, isActionButton: true, textColor: .systemBlue)
         }
