@@ -17,6 +17,85 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Generate App Icon
+        run: |
+          mkdir -p Assets.xcassets/AppIcon.appiconset
+
+          cat > Assets.xcassets/AppIcon.appiconset/Contents.json <<'EOF'
+          {
+            "images": [
+              {
+                "filename": "icon.png",
+                "idiom": "universal",
+                "platform": "ios",
+                "size": "1024x1024"
+              }
+            ],
+            "info": {
+              "author": "xcode",
+              "version": 1
+            }
+          }
+          EOF
+
+          swift - <<'EOF'
+          import AppKit
+
+          let size = NSSize(width: 1024, height: 1024)
+          let image = NSImage(size: size)
+
+          image.lockFocus()
+
+          let background = NSBezierPath(
+              roundedRect: NSRect(x: 0, y: 0, width: 1024, height: 1024),
+              xRadius: 220,
+              yRadius: 220
+          )
+
+          NSColor(
+              red: 0.08,
+              green: 0.42,
+              blue: 0.92,
+              alpha: 1.0
+          ).setFill()
+
+          background.fill()
+
+          let outerCircle = NSBezierPath(
+              ovalIn: NSRect(x: 212, y: 212, width: 600, height: 600)
+          )
+
+          NSColor.white.setFill()
+          outerCircle.fill()
+
+          let innerCircle = NSBezierPath(
+              ovalIn: NSRect(x: 390, y: 390, width: 244, height: 244)
+          )
+
+          NSColor(
+              red: 0.08,
+              green: 0.42,
+              blue: 0.92,
+              alpha: 1.0
+          ).setFill()
+
+          innerCircle.fill()
+
+          image.unlockFocus()
+
+          guard
+              let tiff = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let png = bitmap.representation(using: .png, properties: [:])
+          else {
+              exit(1)
+          }
+
+          try png.write(
+              to: URL(fileURLWithPath: "Assets.xcassets/AppIcon.appiconset/icon.png")
+          )
+          EOF
+
       - name: Generate Xcode Project
         run: |
           xcodegen generate
