@@ -1383,7 +1383,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
                 let newUA = UserAgentStore.shared.getSelectedUA()
                 self.activeTab.webView.customUserAgent = newUA
                 self.activeTab.webView.configuration.defaultWebpagePreferences.preferredContentMode = isDesktop ? .mobile : .desktop
-                self.activeTab.webView.pageZoom = isDesktop ? 1.0 : 0.45
                 self.activeTab.webView.reloadFromOrigin()
             }
         ))
