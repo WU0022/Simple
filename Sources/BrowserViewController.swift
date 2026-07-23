@@ -352,6 +352,10 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         configureToolbarButton(tabsButton, imageName: "square.on.square", action: #selector(showTabsManager))
         configureToolbarButton(moreButton, imageName: "line.3.horizontal", action: #selector(showMoreMenu))
 
+        let longPressMore = UILongPressGestureRecognizer(target: self, action: #selector(handleMoreButtonLongPress(_:)))
+        longPressMore.minimumPressDuration = 1.0
+        moreButton.addGestureRecognizer(longPressMore)
+
         navigationStack.addArrangedSubview(backButton)
         navigationStack.addArrangedSubview(forwardButton)
         navigationStack.addArrangedSubview(pluginButton)
@@ -444,6 +448,11 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         ])
     }
 
+    @objc private func handleMoreButtonLongPress(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began else { return }
+        showCleanDataMenu()
+    }
+
     @objc private func handleAddressLongPress(_ gesture: UILongPressGestureRecognizer) {
         guard gesture.state == .began else { return }
         let urlText = activeTab.url?.absoluteString ?? addressField.text ?? ""
@@ -485,18 +494,15 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         var configuration = UIButton.Configuration.plain()
         configuration.image = UIImage(
             systemName: imageName,
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .regular)
         )
         configuration.baseForegroundColor = .label
         configuration.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 6, bottom: 6, trailing: 6)
 
         button.configuration = configuration
-        button.backgroundColor = .white
-        button.layer.cornerRadius = 12
-        button.layer.shadowColor = UIColor.black.cgColor
-        button.layer.shadowOpacity = 0.04
-        button.layer.shadowRadius = 6
-        button.layer.shadowOffset = CGSize(width: 0, height: 2)
+        button.backgroundColor = .clear
+        button.layer.cornerRadius = 0
+        button.layer.shadowOpacity = 0
         button.clipsToBounds = false
         if let action = action {
             button.addTarget(self, action: action, for: .touchUpInside)
