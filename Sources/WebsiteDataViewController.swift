@@ -68,7 +68,13 @@ final class WebsiteDataManagerViewController: UITableViewController, UISearchRes
         let isLocked = CookieLockStore.shared.isLocked(domain: record.displayName)
 
         var content = cell.defaultContentConfiguration()
-        content.text = record.displayName + (isLocked ? " 🔒" : "")
+        content.text = record.displayName
+        if isLocked {
+            content.image = UIImage(systemName: "lock.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 13, weight: .regular))
+            content.imageProperties.tintColor = .secondaryLabel
+        } else {
+            content.image = nil
+        }
         cell.contentConfiguration = content
         cell.selectionStyle = .none
         return cell
