@@ -38,6 +38,19 @@ struct CustomBottomSheetItem {
     let title: String
     var isDestructive: Bool = false
     let handler: (() -> Void)?
+    let longPressHandler: (() -> Void)?
+
+    init(
+        title: String,
+        isDestructive: Bool = false,
+        handler: (() -> Void)?,
+        longPressHandler: (() -> Void)? = nil
+    ) {
+        self.title = title
+        self.isDestructive = isDestructive
+        self.handler = handler
+        self.longPressHandler = longPressHandler
+    }
 }
 
 final class UserAgentStore {
@@ -139,24 +152,78 @@ final class UserAgentStore {
 
 final class EyeProtectionManager {
     static let shared = EyeProtectionManager()
-    private let key = "eye_protection_enabled_v1"
+
+    private let enabledKey = "eye_protection_enabled_v1"
+    private let levelKey = "eye_protection_level_v2"
     private var overlayView: UIView?
 
+    private enum Level: Int, CaseIterable {
+        case low = 0
+        case medium = 1
+        case high = 2
+
+        var alpha: CGFloat {
+            switch self {
+            case .low:
+                return 0.245
+            case .medium:
+                return 0.35
+            case .high:
+                return 0.455
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .low:
+                return "低强度"
+            case .medium:
+                return "中强度"
+            case .high:
+                return "高强度"
+            }
+        }
+
+        var next: Level {
+            switch self {
+            case .low:
+                return .medium
+            case .medium:
+                return .high
+            case .high:
+                return .low
+            }
+        }
+    }
+
     var isEnabled: Bool {
-        get { UserDefaults.standard.bool(forKey: key) }
-        set { UserDefaults.standard.set(newValue, forKey: key) }
+        get {
+            UserDefaults.standard.bool(forKey: enabledKey)
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: enabledKey)
+        }
+    }
+
+    private var level: Level {
+        get {
+            Level(rawValue: UserDefaults.standard.integer(forKey: levelKey)) ?? .medium
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: levelKey)
+        }
     }
 
     private init() {}
 
     func restoreState(in window: UIWindow?) {
-        if isEnabled {
-            applyOverlay(in: window)
-        }
+        guard isEnabled else { return }
+        applyOverlay(in: window)
     }
 
     func toggle(in window: UIWindow?) {
-        isEnabled = !isEnabled
+        isEnabled.toggle()
+
         if isEnabled {
             applyOverlay(in: window)
         } else {
@@ -164,13 +231,26 @@ final class EyeProtectionManager {
         }
     }
 
+    func advanceLevel(in window: UIWindow?) -> String {
+        level = level.next
+
+        if isEnabled {
+            applyOverlay(in: window)
+        }
+
+        return level.title
+    }
+
     private func applyOverlay(in window: UIWindow?) {
         removeOverlay()
+
         guard let window = window else { return }
+
         let overlay = UIView(frame: window.bounds)
         overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        overlay.backgroundColor = UIColor.black.withAlphaComponent(0.35)
+        overlay.backgroundColor = UIColor.black.withAlphaComponent(level.alpha)
         overlay.isUserInteractionEnabled = false
+
         window.addSubview(overlay)
         overlayView = overlay
     }
