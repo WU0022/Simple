@@ -70,7 +70,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
     private let bottomPanel = UIView()
     private let addressContainer = UIView()
-    private let contentBgView = UIView()
     private let siteSettingsButton = TouchButton(type: .system)
     private let addressField = UITextField()
     private let refreshButton = TouchButton(type: .system)
@@ -110,10 +109,11 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         configureFullscreenExitGesture()
         configureInstallerObserver()
         createNewTab(loadURL: nil)
+    }
 
-        DispatchQueue.main.async { [weak self] in
-            EyeProtectionManager.shared.restoreState(in: self?.view.window)
-        }
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        EyeProtectionManager.shared.restoreState(in: view.window)
     }
 
     override func didReceiveMemoryWarning() {
@@ -267,17 +267,14 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         bottomPanel.clipsToBounds = false
 
         addressContainer.translatesAutoresizingMaskIntoConstraints = false
-        addressContainer.backgroundColor = .clear
+        addressContainer.backgroundColor = .white
+        addressContainer.layer.cornerRadius = 19
+        addressContainer.layer.borderWidth = 0
         addressContainer.layer.shadowColor = UIColor.black.cgColor
         addressContainer.layer.shadowOpacity = 0.05
         addressContainer.layer.shadowRadius = 8
         addressContainer.layer.shadowOffset = CGSize(width: 0, height: 2)
         addressContainer.clipsToBounds = false
-
-        contentBgView.translatesAutoresizingMaskIntoConstraints = false
-        contentBgView.backgroundColor = .white
-        contentBgView.layer.cornerRadius = 19
-        contentBgView.clipsToBounds = true
 
         let longPressAddress = UILongPressGestureRecognizer(target: self, action: #selector(handleAddressLongPress(_:)))
         longPressAddress.minimumPressDuration = 0.6
@@ -337,6 +334,9 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         progressView.trackTintColor = .clear
         progressView.progress = 0
         progressView.alpha = 0
+        progressView.layer.cornerRadius = 19
+        progressView.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+        progressView.clipsToBounds = true
 
         navigationStack.translatesAutoresizingMaskIntoConstraints = false
         navigationStack.axis = .horizontal
@@ -356,13 +356,12 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         navigationStack.addArrangedSubview(tabsButton)
         navigationStack.addArrangedSubview(moreButton)
 
-        contentBgView.addSubview(siteSettingsButton)
-        contentBgView.addSubview(addressField)
-        contentBgView.addSubview(refreshButton)
-        contentBgView.addSubview(clearButton)
-        contentBgView.addSubview(progressView)
+        addressContainer.addSubview(siteSettingsButton)
+        addressContainer.addSubview(addressField)
+        addressContainer.addSubview(refreshButton)
+        addressContainer.addSubview(clearButton)
+        addressContainer.addSubview(progressView)
 
-        addressContainer.addSubview(contentBgView)
         bottomPanel.addSubview(addressContainer)
         bottomPanel.addSubview(navigationStack)
 
@@ -404,35 +403,30 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             addressContainer.trailingAnchor.constraint(equalTo: bottomPanel.trailingAnchor, constant: -16),
             addressContainer.heightAnchor.constraint(equalToConstant: 40),
 
-            contentBgView.topAnchor.constraint(equalTo: addressContainer.topAnchor),
-            contentBgView.bottomAnchor.constraint(equalTo: addressContainer.bottomAnchor),
-            contentBgView.leadingAnchor.constraint(equalTo: addressContainer.leadingAnchor),
-            contentBgView.trailingAnchor.constraint(equalTo: addressContainer.trailingAnchor),
-
-            siteSettingsButton.leadingAnchor.constraint(equalTo: contentBgView.leadingAnchor, constant: 8),
-            siteSettingsButton.centerYAnchor.constraint(equalTo: contentBgView.centerYAnchor),
+            siteSettingsButton.leadingAnchor.constraint(equalTo: addressContainer.leadingAnchor, constant: 8),
+            siteSettingsButton.centerYAnchor.constraint(equalTo: addressContainer.centerYAnchor),
             siteSettingsButton.widthAnchor.constraint(equalToConstant: 24),
             siteSettingsButton.heightAnchor.constraint(equalToConstant: 24),
 
-            progressView.leadingAnchor.constraint(equalTo: contentBgView.leadingAnchor),
-            progressView.trailingAnchor.constraint(equalTo: contentBgView.trailingAnchor),
-            progressView.bottomAnchor.constraint(equalTo: contentBgView.bottomAnchor),
+            progressView.leadingAnchor.constraint(equalTo: addressContainer.leadingAnchor),
+            progressView.trailingAnchor.constraint(equalTo: addressContainer.trailingAnchor),
+            progressView.bottomAnchor.constraint(equalTo: addressContainer.bottomAnchor),
             progressView.heightAnchor.constraint(equalToConstant: 2.5),
 
-            refreshButton.trailingAnchor.constraint(equalTo: contentBgView.trailingAnchor, constant: -8),
-            refreshButton.centerYAnchor.constraint(equalTo: contentBgView.centerYAnchor),
+            refreshButton.trailingAnchor.constraint(equalTo: addressContainer.trailingAnchor, constant: -8),
+            refreshButton.centerYAnchor.constraint(equalTo: addressContainer.centerYAnchor),
             refreshButton.widthAnchor.constraint(equalToConstant: 24),
             refreshButton.heightAnchor.constraint(equalToConstant: 24),
 
-            clearButton.trailingAnchor.constraint(equalTo: contentBgView.trailingAnchor, constant: -8),
-            clearButton.centerYAnchor.constraint(equalTo: contentBgView.centerYAnchor),
+            clearButton.trailingAnchor.constraint(equalTo: addressContainer.trailingAnchor, constant: -8),
+            clearButton.centerYAnchor.constraint(equalTo: addressContainer.centerYAnchor),
             clearButton.widthAnchor.constraint(equalToConstant: 24),
             clearButton.heightAnchor.constraint(equalToConstant: 24),
 
             addressField.leadingAnchor.constraint(equalTo: siteSettingsButton.trailingAnchor, constant: 6),
             addressField.trailingAnchor.constraint(equalTo: refreshButton.leadingAnchor, constant: -6),
-            addressField.topAnchor.constraint(equalTo: contentBgView.topAnchor),
-            addressField.bottomAnchor.constraint(equalTo: contentBgView.bottomAnchor),
+            addressField.topAnchor.constraint(equalTo: addressContainer.topAnchor),
+            addressField.bottomAnchor.constraint(equalTo: addressContainer.bottomAnchor),
 
             navigationStack.topAnchor.constraint(equalTo: addressContainer.bottomAnchor, constant: 8),
             navigationStack.leadingAnchor.constraint(equalTo: bottomPanel.leadingAnchor, constant: 16),
@@ -790,13 +784,8 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         }
 
         textField.textAlignment = .left
+        navigationStack.isHidden = true
         updateAddressEditingAppearance()
-
-        UIView.animate(withDuration: 0.2) {
-            self.navigationStack.alpha = 0
-            self.navigationStack.isHidden = true
-            self.view.layoutIfNeeded()
-        }
 
         DispatchQueue.main.async {
             textField.selectAll(nil)
@@ -811,13 +800,8 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         }
 
         textField.textAlignment = .center
+        navigationStack.isHidden = false
         updateAddressEditingAppearance()
-
-        UIView.animate(withDuration: 0.2) {
-            self.navigationStack.isHidden = false
-            self.navigationStack.alpha = 1
-            self.view.layoutIfNeeded()
-        }
     }
 
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
@@ -871,12 +855,11 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         let frameInView = view.convert(keyboardFrame, from: nil)
         let overlap = max(0, view.bounds.maxY - frameInView.minY)
-        let offset = max(0, overlap - 48)
 
         let curve = userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt ?? 7
         let options = UIView.AnimationOptions(rawValue: curve << 16)
 
-        bottomPanelBottomConstraint?.constant = -offset
+        bottomPanelBottomConstraint?.constant = -overlap
 
         UIView.animate(withDuration: duration, delay: 0, options: options) {
             self.view.layoutIfNeeded()
@@ -1029,7 +1012,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
                 textView.bottomAnchor.constraint(equalTo: vc.view.bottomAnchor)
             ])
 
-            vc.navigationItem.rightBarButtonItem = UIBarButtonItem(title: "完成", style: .done, target: self, action: #selector(self?.dismissModalVC))
+            vc.navigationItem.rightBarButtonItem = UIBarButtonItem(title: "完成", style: .done, target: self, action: #selector(dismissModalVC))
             let nav = UINavigationController(rootViewController: vc)
             self?.present(nav, animated: true)
         }
@@ -1083,7 +1066,14 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         ))
 
         let panel = CustomBottomSheetViewController(title: "正在运行的脚本", items: items, layout: .list)
-        present(panel, animated: false)
+        if #available(iOS 15.0, *) {
+            if let presentation = panel.sheetPresentationController {
+                presentation.detents = [.medium(), .large()]
+                presentation.prefersGrabberVisible = true
+                presentation.preferredCornerRadius = 24
+            }
+        }
+        present(panel, animated: true)
     }
 
     private func showScriptSubMenu(for script: UserScript) {
@@ -1137,7 +1127,14 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         ))
 
         let panel = CustomBottomSheetViewController(title: script.name, items: items, layout: .list)
-        present(panel, animated: false)
+        if #available(iOS 15.0, *) {
+            if let presentation = panel.sheetPresentationController {
+                presentation.detents = [.medium(), .large()]
+                presentation.prefersGrabberVisible = true
+                presentation.preferredCornerRadius = 24
+            }
+        }
+        present(panel, animated: true)
     }
 
     @objc private func showPluginManager() {
@@ -1232,7 +1229,14 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         ))
 
         let panel = CustomBottomSheetViewController(title: "选项", items: items, layout: .grid)
-        present(panel, animated: false)
+        if #available(iOS 15.0, *) {
+            if let presentation = panel.sheetPresentationController {
+                presentation.detents = [.medium(), .large()]
+                presentation.prefersGrabberVisible = true
+                presentation.preferredCornerRadius = 24
+            }
+        }
+        present(panel, animated: true)
     }
 
     private func showUserAgentManager() {
