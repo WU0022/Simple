@@ -419,13 +419,15 @@ final class UserScriptEditorViewController: UIViewController {
         let parsed = UserScriptStore.shared.parseMetadata(from: codeText)
         if nameText.isEmpty { nameText = parsed.name }
         if matchText.isEmpty { matchText = parsed.match }
+        let iconURLText = parsed.iconURL ?? script?.iconURL
 
         let item = UserScript(
             id: script?.id ?? UUID().uuidString,
             name: nameText,
             matchPattern: matchText,
             code: codeText,
-            isEnabled: script?.isEnabled ?? true
+            isEnabled: script?.isEnabled ?? true,
+            iconURL: iconURLText
         )
 
         onSave?(item)
