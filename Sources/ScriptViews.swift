@@ -1,59 +1,206 @@
 import UIKit
 import WebKit
 
-struct MenuSheetItem {
+struct CustomBottomSheetItem {
+    let iconName: String
     let title: String
-    let style: UIAlertAction.Style
+    let subtitle: String?
+    var isDestructive: Bool = false
     let handler: (() -> Void)?
 }
 
-final class MenuSheetViewController: UITableViewController {
-    private var items: [MenuSheetItem] = []
-    private var headerTitle: String?
+final class CustomBottomSheetViewController: UIViewController {
+    private let titleString: String
+    private let subtitleString: String?
+    private let items: [CustomBottomSheetItem]
 
-    init(title: String? = nil, items: [MenuSheetItem]) {
-        self.headerTitle = title
+    private let dimmingView = UIView()
+    private let containerView = UIView()
+
+    init(title: String, subtitle: String? = nil, items: [CustomBottomSheetItem]) {
+        self.titleString = title
+        self.subtitleString = subtitle
         self.items = items
-        super.init(style: .insetGrouped)
+        super.init(nibName: nil, bundle: nil)
+        modalPresentationStyle = .overFullScreen
+        modalTransitionStyle = .crossDissolve
     }
 
     required init?(coder: NSCoder) { nil }
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        self.title = headerTitle
-        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "MenuItemCell")
+        setupViews()
     }
 
-    override func numberOfSections(in tableView: UITableView) -> Int {
-        return 1
-    }
+    private func setupViews() {
+        view.backgroundColor = .clear
 
-    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        return items.count
-    }
+        dimmingView.translatesAutoresizingMaskIntoConstraints = false
+        dimmingView.backgroundColor = UIColor.black.withAlphaComponent(0.4)
+        let tapDimming = UITapGestureRecognizer(target: self, action: #selector(handleDismiss))
+        dimmingView.addGestureRecognizer(tapDimming)
 
-    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: "MenuItemCell", for: indexPath)
-        let item = items[indexPath.row]
-        var config = cell.defaultContentConfiguration()
-        config.text = item.title
-        config.textProperties.alignment = .center
-        if item.style == .destructive {
-            config.textProperties.color = .systemRed
-        } else {
-            config.textProperties.color = .label
+        containerView.translatesAutoresizingMaskIntoConstraints = false
+        containerView.backgroundColor = .secondarySystemGroupedBackground
+        containerView.layer.cornerRadius = 20
+        containerView.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        containerView.clipsToBounds = true
+
+        let handleBar = UIView()
+        handleBar.translatesAutoresizingMaskIntoConstraints = false
+        handleBar.backgroundColor = .systemGray4
+        handleBar.layer.cornerRadius = 2.5
+
+        let headerStack = UIStackView()
+        headerStack.translatesAutoresizingMaskIntoConstraints = false
+        headerStack.axis = .vertical
+        headerStack.spacing = 2
+        headerStack.alignment = .leading
+
+        let titleLabel = UILabel()
+        titleLabel.font = .systemFont(ofSize: 17, weight: .semibold)
+        titleLabel.textColor = .label
+        titleLabel.text = titleString
+        headerStack.addArrangedSubview(titleLabel)
+
+        if let sub = subtitleString, !sub.isEmpty {
+            let subLabel = UILabel()
+            subLabel.font = .systemFont(ofSize: 12, weight: .regular)
+            subLabel.textColor = .secondaryLabel
+            subLabel.text = sub
+            headerStack.addArrangedSubview(subLabel)
         }
-        cell.contentConfiguration = config
-        return cell
+
+        let closeButton = TouchButton(type: .system)
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.tintColor = .tertiaryLabel
+        closeButton.setImage(UIImage(systemName: "xmark.circle.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .medium)), for: .normal)
+        closeButton.addTarget(self, action: #selector(handleDismiss), for: .touchUpInside)
+
+        let scroll = UIScrollView()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+
+        let itemsStack = UIStackView()
+        itemsStack.translatesAutoresizingMaskIntoConstraints = false
+        itemsStack.axis = .vertical
+        itemsStack.spacing = 8
+
+        for (idx, item) in items.enumerated() {
+            let itemView = createItemRow(item: item, index: idx)
+            itemsStack.addArrangedSubview(itemView)
+        }
+
+        scroll.addSubview(itemsStack)
+        containerView.addSubview(handleBar)
+        containerView.addSubview(headerStack)
+        containerView.addSubview(closeButton)
+        containerView.addSubview(scroll)
+
+        view.addSubview(dimmingView)
+        view.addSubview(containerView)
+
+        NSLayoutConstraint.activate([
+            dimmingView.topAnchor.constraint(equalTo: view.topAnchor),
+            dimmingView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            dimmingView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            dimmingView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+
+            containerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            containerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            containerView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            containerView.heightAnchor.constraint(lessThanOrEqualTo: view.heightAnchor, multiplier: 0.8),
+
+            handleBar.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 8),
+            handleBar.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
+            handleBar.widthAnchor.constraint(equalToConstant: 36),
+            handleBar.heightAnchor.constraint(equalToConstant: 5),
+
+            headerStack.topAnchor.constraint(equalTo: handleBar.bottomAnchor, constant: 12),
+            headerStack.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
+            headerStack.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -12),
+
+            closeButton.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -14),
+            closeButton.centerYAnchor.constraint(equalTo: headerStack.centerYAnchor),
+            closeButton.widthAnchor.constraint(equalToConstant: 28),
+            closeButton.heightAnchor.constraint(equalToConstant: 28),
+
+            scroll.topAnchor.constraint(equalTo: headerStack.bottomAnchor, constant: 14),
+            scroll.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
+            scroll.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
+            scroll.bottomAnchor.constraint(equalTo: containerView.safeAreaLayoutGuide.bottomAnchor, constant: -12),
+
+            itemsStack.topAnchor.constraint(equalTo: scroll.topAnchor),
+            itemsStack.leadingAnchor.constraint(equalTo: scroll.leadingAnchor),
+            itemsStack.trailingAnchor.constraint(equalTo: scroll.trailingAnchor),
+            itemsStack.bottomAnchor.constraint(equalTo: scroll.bottomAnchor),
+            itemsStack.widthAnchor.constraint(equalTo: scroll.widthAnchor)
+        ])
     }
 
-    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        tableView.deselectRow(at: indexPath, animated: true)
-        let item = items[indexPath.row]
+    private func createItemRow(item: CustomBottomSheetItem, index: Int) -> UIView {
+        let row = TouchButton(type: .custom)
+        row.backgroundColor = .systemBackground
+        row.layer.cornerRadius = 12
+        row.clipsToBounds = true
+        row.tag = index
+        row.addTarget(self, action: #selector(handleItemTap(_:)), for: .touchUpInside)
+
+        let icon = UIImageView()
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.contentMode = .scaleAspectFit
+        let color: UIColor = item.isDestructive ? .systemRed : .systemBlue
+        icon.tintColor = color
+        icon.image = UIImage(systemName: item.iconName, withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .regular))
+
+        let labelStack = UIStackView()
+        labelStack.translatesAutoresizingMaskIntoConstraints = false
+        labelStack.axis = .vertical
+        labelStack.spacing = 2
+        labelStack.isUserInteractionEnabled = false
+
+        let title = UILabel()
+        title.font = .systemFont(ofSize: 15, weight: .medium)
+        title.textColor = item.isDestructive ? .systemRed : .label
+        title.text = item.title
+        labelStack.addArrangedSubview(title)
+
+        if let sub = item.subtitle, !sub.isEmpty {
+            let subLabel = UILabel()
+            subLabel.font = .systemFont(ofSize: 12, weight: .regular)
+            subLabel.textColor = .secondaryLabel
+            subLabel.text = sub
+            labelStack.addArrangedSubview(subLabel)
+        }
+
+        row.addSubview(icon)
+        row.addSubview(labelStack)
+
+        NSLayoutConstraint.activate([
+            row.heightAnchor.constraint(greaterThanOrEqualToConstant: 50),
+            icon.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 14),
+            icon.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 24),
+            icon.heightAnchor.constraint(equalToConstant: 24),
+
+            labelStack.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 12),
+            labelStack.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -14),
+            labelStack.topAnchor.constraint(equalTo: row.topAnchor, constant: 10),
+            labelStack.bottomAnchor.constraint(equalTo: row.bottomAnchor, constant: -10)
+        ])
+
+        return row
+    }
+
+    @objc private func handleItemTap(_ sender: UIButton) {
+        let item = items[sender.tag]
         dismiss(animated: true) {
             item.handler?()
         }
+    }
+
+    @objc private func handleDismiss() {
+        dismiss(animated: true)
     }
 }
 
@@ -190,13 +337,13 @@ final class UserAgentManagerViewController: UITableViewController {
 
 enum CleanOption: Hashable {
     case cache
-    case cookies
+    case loginAndData
     case searchHistory
     case scriptData
 }
 
 final class CleanDataSelectionViewController: UITableViewController {
-    private var selectedOptions: Set<CleanOption> = [.cache, .cookies]
+    private var selectedOptions: Set<CleanOption> = [.cache]
     var onConfirmClean: ((Set<CleanOption>) -> Void)?
     var onOpenWebsiteDataManager: (() -> Void)?
 
@@ -204,7 +351,11 @@ final class CleanDataSelectionViewController: UITableViewController {
         super.viewDidLoad()
         title = "清除数据"
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "CleanCell")
-        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "完成", style: .done, target: self, action: #selector(requestCleanConfirmation))
+        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "取消", style: .plain, target: self, action: #selector(handleCancel))
+    }
+
+    @objc private func handleCancel() {
+        dismiss(animated: true)
     }
 
     @objc private func requestCleanConfirmation() {
@@ -212,7 +363,13 @@ final class CleanDataSelectionViewController: UITableViewController {
             dismiss(animated: true)
             return
         }
-        let alert = UIAlertController(title: "确认清理", message: "确定要清理选中的网站数据吗？", preferredStyle: .alert)
+
+        var message = "确定要执行清理操作吗？"
+        if selectedOptions.contains(.loginAndData) {
+            message = "⚠️ 注意：勾选了“登录与本地重要数据”，未受保护网站的 Cookies 和本地数据库将被清除，可能需要重新登录。"
+        }
+
+        let alert = UIAlertController(title: "确认清理", message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "取消", style: .cancel, handler: nil))
         alert.addAction(UIAlertAction(title: "确定清理", style: .destructive) { [weak self] _ in
             guard let self = self else { return }
@@ -233,34 +390,45 @@ final class CleanDataSelectionViewController: UITableViewController {
         return 1
     }
 
+    override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
+        if section == 0 {
+            return "受 protection 锁保护的网站登录信息与数据库不会被批量清理删除。"
+        }
+        return nil
+    }
+
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
+        let cell = UITableViewCell(style: .subtitle, reuseIdentifier: nil)
 
         if indexPath.section == 0 {
             let option: CleanOption
             switch indexPath.row {
             case 0:
                 cell.textLabel?.text = "网页缓存文件"
+                cell.detailTextLabel?.text = "包括图片、样式与静态资源 (受保护域名也会清理缓存)"
                 option = .cache
             case 1:
-                cell.textLabel?.text = "Cookie 数据 (保留锁定保护项)"
-                option = .cookies
+                cell.textLabel?.text = "登录与本地重要数据"
+                cell.detailTextLabel?.text = "Cookies、Local Storage 与数据库 (受保护域名跳过)"
+                option = .loginAndData
             case 2:
                 cell.textLabel?.text = "搜索历史记录"
+                cell.detailTextLabel?.text = "地址栏输入的最近搜索词记录"
                 option = .searchHistory
             default:
                 cell.textLabel?.text = "用户脚本缓存数据"
+                cell.detailTextLabel?.text = "油猴脚本保存在沙箱中的配置数据"
                 option = .scriptData
             }
 
             let isChecked = selectedOptions.contains(option)
             cell.accessoryType = isChecked ? .checkmark : .none
         } else if indexPath.section == 1 {
-            cell.textLabel?.text = "确认清除"
+            cell.textLabel?.text = "确认清理"
             cell.textLabel?.textColor = .systemRed
             cell.textLabel?.textAlignment = .center
         } else {
-            cell.textLabel?.text = "管理网站数据"
+            cell.textLabel?.text = "管理网站数据与锁定保护"
             cell.textLabel?.textColor = .systemBlue
             cell.textLabel?.textAlignment = .center
         }
@@ -275,7 +443,7 @@ final class CleanDataSelectionViewController: UITableViewController {
             let option: CleanOption
             switch indexPath.row {
             case 0: option = .cache
-            case 1: option = .cookies
+            case 1: option = .loginAndData
             case 2: option = .searchHistory
             default: option = .scriptData
             }
@@ -382,8 +550,8 @@ final class WebsiteDataManagerViewController: UITableViewController {
         title = "管理网站数据"
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "DataRecordCell")
 
-        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "返回", style: .plain, target: self, action: #selector(handleDone))
-        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "移除", style: .plain, target: self, action: #selector(handleRemoveAll))
+        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "关闭", style: .plain, target: self, action: #selector(handleDone))
+        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "清理所有缓存", style: .plain, target: self, action: #selector(handleCleanAllCaches))
         loadData()
     }
 
@@ -401,19 +569,11 @@ final class WebsiteDataManagerViewController: UITableViewController {
         dismiss(animated: true)
     }
 
-    @objc private func handleRemoveAll() {
-        let alert = UIAlertController(title: "移除网站数据", message: "确定要移除所有未受锁定保护的网站数据吗？", preferredStyle: .actionSheet)
-        alert.addAction(UIAlertAction(title: "移除全部", style: .destructive) { [weak self] _ in
-            guard let self = self else { return }
-            let unlockedRecords = self.records.filter { !CookieLockStore.shared.isLocked(domain: $0.displayName) }
-            let types = WKWebsiteDataStore.allWebsiteDataTypes()
-            WKWebsiteDataStore.default().removeData(ofTypes: types, for: unlockedRecords) {
-                DispatchQueue.main.async {
-                    let unlockedNames = Set(unlockedRecords.map { $0.displayName })
-                    self.records.removeAll { unlockedNames.contains($0.displayName) }
-                    self.tableView.reloadData()
-                    self.loadData()
-                }
+    @objc private func handleCleanAllCaches() {
+        let alert = UIAlertController(title: "清理所有临时缓存", message: "将清理所有网站的网页缓存文件，受保护网站的登录与本地数据会得到完整保留。", preferredStyle: .actionSheet)
+        alert.addAction(UIAlertAction(title: "清理缓存", style: .destructive) { [weak self] _ in
+            WebsiteCleaner.shared.cleanCacheOnly {
+                self?.loadData()
             }
         })
         alert.addAction(UIAlertAction(title: "取消", style: .cancel, handler: nil))
@@ -430,15 +590,17 @@ final class WebsiteDataManagerViewController: UITableViewController {
         let isLocked = CookieLockStore.shared.isLocked(domain: record.displayName)
 
         var content = cell.defaultContentConfiguration()
-        content.text = record.displayName + (isLocked ? " 🔒" : "")
+        content.text = record.displayName + (isLocked ? " 🔒 (已保护数据)" : "")
 
         var dataTypesDescs: [String] = []
         if record.dataTypes.contains(WKWebsiteDataTypeCookies) { dataTypesDescs.append("Cookies") }
-        if record.dataTypes.contains(WKWebsiteDataTypeDiskCache) || record.dataTypes.contains(WKWebsiteDataTypeMemoryCache) { dataTypesDescs.append("磁盘缓存") }
+        if record.dataTypes.contains(WKWebsiteDataTypeDiskCache) || record.dataTypes.contains(WKWebsiteDataTypeMemoryCache) { dataTypesDescs.append("网页缓存") }
         if record.dataTypes.contains(WKWebsiteDataTypeLocalStorage) { dataTypesDescs.append("本地存储") }
+        if record.dataTypes.contains(WKWebsiteDataTypeIndexedDBDatabases) { dataTypesDescs.append("IndexedDB") }
 
-        content.secondaryText = dataTypesDescs.joined(separator: ", ")
+        content.secondaryText = dataTypesDescs.joined(separator: " · ")
         cell.contentConfiguration = content
+        cell.accessoryType = .disclosureIndicator
         return cell
     }
 
@@ -446,94 +608,140 @@ final class WebsiteDataManagerViewController: UITableViewController {
         tableView.deselectRow(at: indexPath, animated: true)
         guard indexPath.row < records.count else { return }
         let record = records[indexPath.row]
-        let isLocked = CookieLockStore.shared.isLocked(domain: record.displayName)
 
-        let alert = UIAlertController(title: record.displayName, message: nil, preferredStyle: .actionSheet)
-        alert.addAction(UIAlertAction(title: isLocked ? "🔓 解除 Cookie 锁定" : "🔒 锁定 Cookie 防误删", style: .default) { [weak self] _ in
-            CookieLockStore.shared.toggleLock(domain: record.displayName)
-            self?.tableView.reloadData()
-        })
-        alert.addAction(UIAlertAction(title: "🗑 删除此网站数据", style: .destructive) { [weak self] _ in
-            let types = WKWebsiteDataStore.allWebsiteDataTypes()
-            WKWebsiteDataStore.default().removeData(ofTypes: types, for: [record]) {
-                DispatchQueue.main.async {
-                    self?.records.removeAll { $0.displayName == record.displayName }
-                    self?.tableView.reloadData()
-                    self?.loadData()
-                }
-            }
-        })
-        alert.addAction(UIAlertAction(title: "取消", style: .cancel, handler: nil))
-        present(alert, animated: true)
+        let detailVC = DomainDataDetailViewController(record: record) { [weak self] in
+            self?.loadData()
+        }
+        navigationController?.pushViewController(detailVC, animated: true)
     }
 
     override func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCell.EditingStyle, forRowAt indexPath: IndexPath) {
         if editingStyle == .delete {
             let record = records[indexPath.row]
-            let types = WKWebsiteDataStore.allWebsiteDataTypes()
-            WKWebsiteDataStore.default().removeData(ofTypes: types, for: [record]) { [weak self] in
-                DispatchQueue.main.async {
-                    self?.records.remove(at: indexPath.row)
-                    tableView.deleteRows(at: [indexPath], with: .automatic)
-                    self?.loadData()
-                }
+            let isLocked = CookieLockStore.shared.isLocked(domain: record.displayName)
+
+            if isLocked {
+                let alert = UIAlertController(title: "受保护的网站", message: "\(record.displayName) 当前开启了数据保护，无法直接删除登录与本地数据库。是否仅清理该网站缓存？", preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "仅清理缓存", style: .default) { [weak self] _ in
+                    WebsiteCleaner.shared.cleanSingleDomain(record: record, cacheOnly: true) {
+                        self?.loadData()
+                    }
+                })
+                alert.addAction(UIAlertAction(title: "取消", style: .cancel, handler: nil))
+                present(alert, animated: true)
+                return
+            }
+
+            WebsiteCleaner.shared.cleanSingleDomain(record: record, cacheOnly: false) { [weak self] in
+                self?.loadData()
             }
         }
     }
 }
 
-final class CookieLockManagerViewController: UITableViewController {
-    private var lockedDomains: [String] = []
+final class DomainDataDetailViewController: UITableViewController {
+    private var record: WKWebsiteDataRecord
+    private var isProtected: Bool
+    var onDataChanged: (() -> Void)?
+
+    init(record: WKWebsiteDataRecord, onDataChanged: (() -> Void)?) {
+        self.record = record
+        self.isProtected = CookieLockStore.shared.isLocked(domain: record.displayName)
+        self.onDataChanged = onDataChanged
+        super.init(style: .insetGrouped)
+    }
+
+    required init?(coder: NSCoder) { nil }
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Cookie 锁定保护列表"
-        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "LockCell")
-
-        navigationItem.rightBarButtonItem = UIBarButtonItem(
-            title: "完成",
-            style: .done,
-            target: self,
-            action: #selector(handleDone)
-        )
-        loadData()
+        title = record.displayName
+        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "DetailCell")
     }
 
-    private func loadData() {
-        lockedDomains = CookieLockStore.shared.getLockedDomains()
-        tableView.reloadData()
-    }
-
-    @objc private func handleDone() {
-        dismiss(animated: true)
+    override func numberOfSections(in tableView: UITableView) -> Int {
+        return 3
     }
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        lockedDomains.count
+        if section == 0 { return 1 }
+        if section == 1 { return 1 }
+        return 2
+    }
+
+    override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
+        if section == 0 { return "数据保护选项" }
+        if section == 1 { return "当前含有的数据类型" }
+        return "数据管理操作"
     }
 
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: "LockCell", for: indexPath)
-        let domain = lockedDomains[indexPath.row]
+        let cell = UITableViewCell(style: .default, reuseIdentifier: "DetailCell")
 
-        var content = cell.defaultContentConfiguration()
-        content.text = "🔒 " + domain
-        content.secondaryText = "在清理 Cookie 时将受到强保护不被删除"
-        cell.contentConfiguration = content
+        if indexPath.section == 0 {
+            cell.textLabel?.text = "保护登录与本地数据"
+            let toggle = UISwitch()
+            toggle.isOn = isProtected
+            toggle.addTarget(self, action: #selector(handleProtectionToggle(_:)), for: .valueChanged)
+            cell.accessoryView = toggle
+        } else if indexPath.section == 1 {
+            var dataTypesDescs: [String] = []
+            if record.dataTypes.contains(WKWebsiteDataTypeCookies) { dataTypesDescs.append("Cookies") }
+            if record.dataTypes.contains(WKWebsiteDataTypeDiskCache) || record.dataTypes.contains(WKWebsiteDataTypeMemoryCache) { dataTypesDescs.append("磁盘与内存缓存") }
+            if record.dataTypes.contains(WKWebsiteDataTypeLocalStorage) { dataTypesDescs.append("本地存储 (LocalStorage)") }
+            if record.dataTypes.contains(WKWebsiteDataTypeIndexedDBDatabases) { dataTypesDescs.append("数据库 (IndexedDB)") }
+
+            cell.textLabel?.text = dataTypesDescs.joined(separator: "\n")
+            cell.textLabel?.numberOfLines = 0
+            cell.textLabel?.font = .systemFont(ofSize: 14)
+            cell.selectionStyle = .none
+        } else {
+            if indexPath.row == 0 {
+                cell.textLabel?.text = "清理该网站临时缓存"
+                cell.textLabel?.textColor = .systemBlue
+                cell.textLabel?.textAlignment = .center
+            } else {
+                cell.textLabel?.text = isProtected ? "解除保护并完全重置网站" : "完全重置该网站"
+                cell.textLabel?.textColor = .systemRed
+                cell.textLabel?.textAlignment = .center
+            }
+        }
 
         return cell
     }
 
-    override func tableView(
-        _ tableView: UITableView,
-        commit editingStyle: UITableViewCell.EditingStyle,
-        forRowAt indexPath: IndexPath
-    ) {
-        if editingStyle == .delete {
-            let domain = lockedDomains[indexPath.row]
-            CookieLockStore.shared.toggleLock(domain: domain)
-            lockedDomains.remove(at: indexPath.row)
-            tableView.deleteRows(at: [indexPath], with: .automatic)
+    @objc private func handleProtectionToggle(_ sender: UISwitch) {
+        CookieLockStore.shared.toggleLock(domain: record.displayName)
+        isProtected = sender.isOn
+        tableView.reloadData()
+        onDataChanged?()
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+
+        if indexPath.section == 2 {
+            if indexPath.row == 0 {
+                WebsiteCleaner.shared.cleanSingleDomain(record: record, cacheOnly: true) { [weak self] in
+                    self?.onDataChanged?()
+                    self?.navigationController?.popViewController(animated: true)
+                }
+            } else {
+                let title = isProtected ? "确定解除保护并删除吗？" : "确定重置该网站吗？"
+                let alert = UIAlertController(title: title, message: "将清除 \(record.displayName) 的所有 Cookies、缓存与本地数据库，且不可恢复。", preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "重置删除", style: .destructive) { [weak self] _ in
+                    guard let self = self else { return }
+                    if self.isProtected {
+                        CookieLockStore.shared.toggleLock(domain: self.record.displayName)
+                    }
+                    WebsiteCleaner.shared.cleanSingleDomain(record: self.record, cacheOnly: false) {
+                        self.onDataChanged?()
+                        self.navigationController?.popViewController(animated: true)
+                    }
+                })
+                alert.addAction(UIAlertAction(title: "取消", style: .cancel, handler: nil))
+                present(alert, animated: true)
+            }
         }
     }
 }
