@@ -586,7 +586,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
     private func configureFullscreenExitGesture() {
         let gesture = UILongPressGestureRecognizer(target: self, action: #selector(handleFullscreenExitGesture(_:)))
-        gesture.minimumPressDuration = 0.5
+        gesture.minimumPressDuration = 2.0
         gesture.numberOfTouchesRequired = 2
         gesture.cancelsTouchesInView = false
         view.addGestureRecognizer(gesture)
@@ -758,11 +758,25 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         SearchHistoryStore.shared.addHistory(value)
 
         if value.hasPrefix("http://") || value.hasPrefix("https://") {
-            return URL(string: value)
+            if let url = URL(string: value) {
+                return url
+            }
+            if let encoded = value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+               let url = URL(string: encoded) {
+                return url
+            }
+            return nil
         }
 
         if value.contains(".") && !value.contains(" ") {
-            return URL(string: "https://" + value)
+            let prefixed = "https://" + value
+            if let url = URL(string: prefixed) {
+                return url
+            }
+            if let encoded = prefixed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+               let url = URL(string: encoded) {
+                return url
+            }
         }
 
         if let encodedQuery = value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
@@ -1278,6 +1292,10 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             title: isEyeOn ? "关闭护眼" : "护眼模式",
             handler: { [weak self] in
                 EyeProtectionManager.shared.toggle(in: self?.view.window)
+            },
+            longPressHandler: { [weak self] in
+                let levelName = EyeProtectionManager.shared.advanceLevel(in: self?.view.window)
+                self?.showToastNotice("护眼强度：\(levelName)")
             }
         ))
 
@@ -1332,8 +1350,12 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
     private func showCleanDataMenu() {
         let cleanVC = CleanDataSelectionViewController()
-        cleanVC.onConfirmClean = { [weak self] options in
-            self?.performCleanData(options: options)
+        cleanVC.onConfirmClean = { [weak self] options, completion in
+            guard let self = self else {
+                completion()
+                return
+            }
+            self.performCleanData(options: options, completion: completion)
         }
         cleanVC.onOpenWebsiteDataManager = { [weak self] in
             let manager = WebsiteDataManagerViewController()
@@ -1344,7 +1366,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         present(nav, animated: true)
     }
 
-    private func performCleanData(options: Set<CleanOption>) {
+    private func performCleanData(options: Set<CleanOption>, completion: @escaping () -> Void) {
         let group = DispatchGroup()
 
         if options.contains(.cache) {
@@ -1370,8 +1392,8 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         }
 
         group.notify(queue: .main) { [weak self] in
-            self?.showToastNotice("数据清理完成")
             self?.activeTab.webView.reload()
+            completion()
         }
     }
 }
