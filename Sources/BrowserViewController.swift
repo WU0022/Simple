@@ -77,6 +77,8 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     private let failureBackButton = TouchButton(type: .system)
     private let failureReloadButton = TouchButton(type: .system)
 
+    private let editingDimmingView = UIView()
+
     private let bottomPanel = UIView()
     private let addressShadowView = UIView()
     private let addressContainer = UIView()
@@ -189,6 +191,25 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         task.resume()
     }
 
+    private func makeSpacedThreeLinesIcon() -> UIImage {
+        let size = CGSize(width: 20, height: 18)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let img = renderer.image { ctx in
+            let cg = ctx.cgContext
+            cg.setLineWidth(1.8)
+            cg.setLineCap(.round)
+            cg.setStrokeColor(UIColor.black.cgColor)
+
+            let yOffsets: [CGFloat] = [2.0, 9.0, 16.0]
+            for y in yOffsets {
+                cg.move(to: CGPoint(x: 1.5, y: y))
+                cg.addLine(to: CGPoint(x: 18.5, y: y))
+            }
+            cg.strokePath()
+        }
+        return img.withRenderingMode(.alwaysTemplate)
+    }
+
     private func configureInterface() {
         let themeBg = UIColor(red: 0.96, green: 0.96, blue: 0.97, alpha: 1.0)
         view.backgroundColor = themeBg
@@ -271,6 +292,13 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             btnStack.widthAnchor.constraint(equalToConstant: 240),
             btnStack.heightAnchor.constraint(equalToConstant: 40)
         ])
+
+        editingDimmingView.translatesAutoresizingMaskIntoConstraints = false
+        editingDimmingView.backgroundColor = UIColor.black.withAlphaComponent(0.12)
+        editingDimmingView.alpha = 0
+        editingDimmingView.isHidden = true
+        let dimmingTap = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
+        editingDimmingView.addGestureRecognizer(dimmingTap)
 
         bottomPanel.translatesAutoresizingMaskIntoConstraints = false
         bottomPanel.backgroundColor = themeBg
@@ -385,6 +413,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         view.addSubview(webContainer)
         view.addSubview(homeView)
         view.addSubview(failureOverlayView)
+        view.addSubview(editingDimmingView)
         view.addSubview(bottomPanel)
 
         bottomPanelBottomConstraint = bottomPanel.bottomAnchor.constraint(equalTo: view.bottomAnchor)
@@ -410,6 +439,11 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             failureOverlayView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             failureOverlayView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             failureOverlayView.bottomAnchor.constraint(equalTo: webContainer.bottomAnchor),
+
+            editingDimmingView.topAnchor.constraint(equalTo: view.topAnchor),
+            editingDimmingView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            editingDimmingView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            editingDimmingView.bottomAnchor.constraint(equalTo: bottomPanel.topAnchor),
 
             bottomPanel.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             bottomPanel.trailingAnchor.constraint(equalTo: view.trailingAnchor),
@@ -502,11 +536,14 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
     private func configureToolbarButton(_ button: TouchButton, imageName: String, action: Selector?) {
         var configuration = UIButton.Configuration.plain()
-        let size: CGFloat = imageName == "line.3.horizontal" ? 16 : 18
-        configuration.image = UIImage(
-            systemName: imageName,
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: size, weight: .regular)
-        )
+        if imageName == "line.3.horizontal" {
+            configuration.image = makeSpacedThreeLinesIcon()
+        } else {
+            configuration.image = UIImage(
+                systemName: imageName,
+                withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .regular)
+            )
+        }
         configuration.baseForegroundColor = .label
         configuration.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 6, bottom: 6, trailing: 6)
 
@@ -821,6 +858,11 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         navigationStack.isHidden = true
         updateAddressEditingAppearance()
 
+        editingDimmingView.isHidden = false
+        UIView.animate(withDuration: 0.2) {
+            self.editingDimmingView.alpha = 1
+        }
+
         DispatchQueue.main.async {
             textField.selectAll(nil)
         }
@@ -835,6 +877,12 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         navigationStack.isHidden = false
         updateAddressEditingAppearance()
+
+        UIView.animate(withDuration: 0.2, animations: {
+            self.editingDimmingView.alpha = 0
+        }) { _ in
+            self.editingDimmingView.isHidden = true
+        }
     }
 
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
