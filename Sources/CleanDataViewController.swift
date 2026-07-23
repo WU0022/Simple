@@ -4,7 +4,7 @@ final class CleanDataSelectionViewController: UIViewController, UITableViewDataS
     private var selectedOptions: Set<CleanOption> = [.cache]
     private let savedOptionsKey = "browser_saved_clean_options_v1"
 
-    var onConfirmClean: ((Set<CleanOption>) -> Void)?
+    var onConfirmClean: ((Set<CleanOption>, @escaping () -> Void) -> Void)?
     var onOpenWebsiteDataManager: (() -> Void)?
 
     private let tableView = UITableView(frame: .zero, style: .insetGrouped)
@@ -63,11 +63,13 @@ final class CleanDataSelectionViewController: UIViewController, UITableViewDataS
         alert.addAction(UIAlertAction(title: "确定清理", style: .default) { [weak self] _ in
             guard let self = self else { return }
             let opts = self.selectedOptions
-            self.onConfirmClean?(opts)
-            let successAlert = UIAlertController(title: nil, message: "清理完成", preferredStyle: .alert)
-            self.present(successAlert, animated: true)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                successAlert.dismiss(animated: true)
+            self.onConfirmClean?(opts) { [weak self] in
+                guard let self = self else { return }
+                let successAlert = UIAlertController(title: nil, message: "清理完成", preferredStyle: .alert)
+                self.present(successAlert, animated: true)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    successAlert.dismiss(animated: true)
+                }
             }
         })
         present(alert, animated: true)
