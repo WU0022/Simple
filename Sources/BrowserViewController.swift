@@ -69,6 +69,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     private let failureReloadButton = TouchButton(type: .system)
 
     private let bottomPanel = UIView()
+    private let addressShadowView = UIView()
     private let addressContainer = UIView()
     private let siteSettingsButton = TouchButton(type: .system)
     private let addressField = UITextField()
@@ -266,15 +267,19 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         bottomPanel.backgroundColor = themeBg
         bottomPanel.clipsToBounds = false
 
+        addressShadowView.translatesAutoresizingMaskIntoConstraints = false
+        addressShadowView.backgroundColor = .white
+        addressShadowView.layer.cornerRadius = 19
+        addressShadowView.layer.shadowColor = UIColor.black.cgColor
+        addressShadowView.layer.shadowOpacity = 0.05
+        addressShadowView.layer.shadowRadius = 8
+        addressShadowView.layer.shadowOffset = CGSize(width: 0, height: 2)
+        addressShadowView.clipsToBounds = false
+
         addressContainer.translatesAutoresizingMaskIntoConstraints = false
         addressContainer.backgroundColor = .white
         addressContainer.layer.cornerRadius = 19
-        addressContainer.layer.borderWidth = 0
-        addressContainer.layer.shadowColor = UIColor.black.cgColor
-        addressContainer.layer.shadowOpacity = 0.05
-        addressContainer.layer.shadowRadius = 8
-        addressContainer.layer.shadowOffset = CGSize(width: 0, height: 2)
-        addressContainer.clipsToBounds = false
+        addressContainer.clipsToBounds = true
 
         let longPressAddress = UILongPressGestureRecognizer(target: self, action: #selector(handleAddressLongPress(_:)))
         longPressAddress.minimumPressDuration = 0.6
@@ -359,6 +364,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         addressContainer.addSubview(clearButton)
         addressContainer.addSubview(progressView)
 
+        bottomPanel.addSubview(addressShadowView)
         bottomPanel.addSubview(addressContainer)
         bottomPanel.addSubview(navigationStack)
 
@@ -400,15 +406,20 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             addressContainer.trailingAnchor.constraint(equalTo: bottomPanel.trailingAnchor, constant: -16),
             addressContainer.heightAnchor.constraint(equalToConstant: 40),
 
+            addressShadowView.topAnchor.constraint(equalTo: addressContainer.topAnchor),
+            addressShadowView.leadingAnchor.constraint(equalTo: addressContainer.leadingAnchor),
+            addressShadowView.trailingAnchor.constraint(equalTo: addressContainer.trailingAnchor),
+            addressShadowView.bottomAnchor.constraint(equalTo: addressContainer.bottomAnchor),
+
             siteSettingsButton.leadingAnchor.constraint(equalTo: addressContainer.leadingAnchor, constant: 8),
             siteSettingsButton.centerYAnchor.constraint(equalTo: addressContainer.centerYAnchor),
             siteSettingsButton.widthAnchor.constraint(equalToConstant: 24),
             siteSettingsButton.heightAnchor.constraint(equalToConstant: 24),
 
-            progressView.leadingAnchor.constraint(equalTo: addressContainer.leadingAnchor, constant: 16),
-            progressView.trailingAnchor.constraint(equalTo: addressContainer.trailingAnchor, constant: -16),
-            progressView.bottomAnchor.constraint(equalTo: addressContainer.bottomAnchor, constant: -2),
-            progressView.heightAnchor.constraint(equalToConstant: 2),
+            progressView.leadingAnchor.constraint(equalTo: addressContainer.leadingAnchor),
+            progressView.trailingAnchor.constraint(equalTo: addressContainer.trailingAnchor),
+            progressView.bottomAnchor.constraint(equalTo: addressContainer.bottomAnchor),
+            progressView.heightAnchor.constraint(equalToConstant: 2.5),
 
             refreshButton.trailingAnchor.constraint(equalTo: addressContainer.trailingAnchor, constant: -8),
             refreshButton.centerYAnchor.constraint(equalTo: addressContainer.centerYAnchor),
