@@ -61,7 +61,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
     private let webContainer = UIView()
     private let homeView = UIView()
-    private let bottomPanel = UIView()
+    private let bottomBlurView = UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterial))
     private let addressContainer = UIView()
     private let siteSettingsButton = TouchButton(type: .system)
     private let addressField = UITextField()
@@ -122,6 +122,11 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         progressObservation?.invalidate()
     }
 
+    private func resetProgress() {
+        progressView.setProgress(0, animated: false)
+        progressView.alpha = 0
+    }
+
     private func configureInstallerObserver() {
         NotificationCenter.default.addObserver(
             self,
@@ -167,25 +172,28 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     }
 
     private func configureInterface() {
-        view.backgroundColor = .systemBackground
+        view.backgroundColor = .systemGroupedBackground
 
         webContainer.translatesAutoresizingMaskIntoConstraints = false
-        webContainer.backgroundColor = .systemBackground
+        webContainer.backgroundColor = .systemGroupedBackground
 
         homeView.translatesAutoresizingMaskIntoConstraints = false
-        homeView.backgroundColor = .systemBackground
+        homeView.backgroundColor = .systemGroupedBackground
 
-        bottomPanel.translatesAutoresizingMaskIntoConstraints = false
-        bottomPanel.backgroundColor = .secondarySystemBackground
+        bottomBlurView.translatesAutoresizingMaskIntoConstraints = false
+        bottomBlurView.layer.cornerRadius = 24
+        bottomBlurView.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        bottomBlurView.clipsToBounds = true
+        bottomBlurView.layer.shadowColor = UIColor.black.cgColor
+        bottomBlurView.layer.shadowOpacity = 0.05
+        bottomBlurView.layer.shadowRadius = 10
+        bottomBlurView.layer.shadowOffset = CGSize(width: 0, height: -2)
 
         addressContainer.translatesAutoresizingMaskIntoConstraints = false
-        addressContainer.backgroundColor = .systemBackground
-        addressContainer.layer.cornerRadius = 18
-        addressContainer.layer.borderWidth = 0
-        addressContainer.layer.shadowColor = UIColor.black.cgColor
-        addressContainer.layer.shadowOpacity = 0.08
-        addressContainer.layer.shadowRadius = 8
-        addressContainer.layer.shadowOffset = CGSize(width: 0, height: 3)
+        addressContainer.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.85)
+        addressContainer.layer.cornerRadius = 19
+        addressContainer.layer.borderWidth = 0.5
+        addressContainer.layer.borderColor = UIColor.separator.cgColor
         addressContainer.clipsToBounds = true
 
         let longPressAddress = UILongPressGestureRecognizer(target: self, action: #selector(handleAddressLongPress(_:)))
@@ -271,18 +279,19 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         addressContainer.addSubview(clearButton)
         addressContainer.addSubview(progressView)
 
-        bottomPanel.addSubview(addressContainer)
-        bottomPanel.addSubview(navigationStack)
+        let contentView = bottomBlurView.contentView
+        contentView.addSubview(addressContainer)
+        contentView.addSubview(navigationStack)
 
         view.addSubview(webContainer)
         view.addSubview(homeView)
-        view.addSubview(bottomPanel)
+        view.addSubview(bottomBlurView)
 
-        bottomPanelBottomConstraint = bottomPanel.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        bottomPanelBottomConstraint = bottomBlurView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
 
         webTopSafeConstraint = webContainer.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor)
         webTopFullscreenConstraint = webContainer.topAnchor.constraint(equalTo: view.topAnchor)
-        webBottomPanelConstraint = webContainer.bottomAnchor.constraint(equalTo: bottomPanel.topAnchor)
+        webBottomPanelConstraint = webContainer.bottomAnchor.constraint(equalTo: bottomBlurView.topAnchor)
         webBottomFullscreenConstraint = webContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor)
 
         webTopSafeConstraint?.isActive = true
@@ -297,14 +306,14 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             homeView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             homeView.bottomAnchor.constraint(equalTo: webContainer.bottomAnchor),
 
-            bottomPanel.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            bottomPanel.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            bottomBlurView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            bottomBlurView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             bottomPanelBottomConstraint!,
 
-            addressContainer.topAnchor.constraint(equalTo: bottomPanel.topAnchor, constant: 6),
-            addressContainer.leadingAnchor.constraint(equalTo: bottomPanel.leadingAnchor, constant: 14),
-            addressContainer.trailingAnchor.constraint(equalTo: bottomPanel.trailingAnchor, constant: -14),
-            addressContainer.heightAnchor.constraint(equalToConstant: 36),
+            addressContainer.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
+            addressContainer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+            addressContainer.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            addressContainer.heightAnchor.constraint(equalToConstant: 38),
 
             siteSettingsButton.leadingAnchor.constraint(equalTo: addressContainer.leadingAnchor, constant: 8),
             siteSettingsButton.centerYAnchor.constraint(equalTo: addressContainer.centerYAnchor),
@@ -331,10 +340,10 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             addressField.topAnchor.constraint(equalTo: addressContainer.topAnchor),
             addressField.bottomAnchor.constraint(equalTo: addressContainer.bottomAnchor),
 
-            navigationStack.topAnchor.constraint(equalTo: addressContainer.bottomAnchor, constant: 2),
-            navigationStack.leadingAnchor.constraint(equalTo: bottomPanel.leadingAnchor, constant: 10),
-            navigationStack.trailingAnchor.constraint(equalTo: bottomPanel.trailingAnchor, constant: -10),
-            navigationStack.bottomAnchor.constraint(equalTo: bottomPanel.safeAreaLayoutGuide.bottomAnchor, constant: -1),
+            navigationStack.topAnchor.constraint(equalTo: addressContainer.bottomAnchor, constant: 4),
+            navigationStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
+            navigationStack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
+            navigationStack.bottomAnchor.constraint(equalTo: contentView.safeAreaLayoutGuide.bottomAnchor, constant: -2),
             navigationStack.heightAnchor.constraint(equalToConstant: 38)
         ])
     }
@@ -364,7 +373,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         view.addSubview(toast)
         NSLayoutConstraint.activate([
             toast.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            toast.bottomAnchor.constraint(equalTo: bottomPanel.topAnchor, constant: -12),
+            toast.bottomAnchor.constraint(equalTo: bottomBlurView.topAnchor, constant: -12),
             toast.heightAnchor.constraint(equalToConstant: 32)
         ])
 
@@ -422,8 +431,9 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         view.addGestureRecognizer(gesture)
     }
 
-    private func createNewTab(loadURL url: URL?) {
+    private func createNewTab(loadURL url: URL?, sourceID: UUID? = nil) {
         let tab = TabItem()
+        tab.sourceTabID = sourceID
         tab.delegate = self
         tabs.append(tab)
         switchTab(to: tabs.count - 1)
@@ -442,6 +452,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             activeTab.webView.removeFromSuperview()
         }
 
+        resetProgress()
         activeTabIndex = index
 
         let tab = activeTab
@@ -469,6 +480,8 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
     private func closeTab(at index: Int) {
         guard tabs.indices.contains(index) else { return }
+        resetProgress()
+
         let tab = tabs[index]
         tab.destroy()
         tabs.remove(at: index)
@@ -489,9 +502,12 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         progressObservation = webView.observe(\.estimatedProgress, options: [.new]) { [weak self] observedWebView, _ in
             DispatchQueue.main.async {
-                guard let self = self, observedWebView.isLoading, self.homeView.alpha < 0.5 else {
-                    self?.progressView.alpha = 0
-                    self?.progressView.setProgress(0, animated: false)
+                guard let self = self,
+                      observedWebView == self.activeTab.webView,
+                      observedWebView.isLoading,
+                      self.homeView.alpha < 0.5,
+                      !self.activeTab.isDisplayingFailurePage else {
+                    self?.resetProgress()
                     return
                 }
 
@@ -512,8 +528,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         webContainer.alpha = 0
         addressField.text = ""
         addressField.resignFirstResponder()
-        progressView.alpha = 0
-        progressView.setProgress(0, animated: false)
+        resetProgress()
         updateUIState()
     }
 
@@ -530,7 +545,8 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         let isHome = homeView.alpha > 0.5
 
-        backButton.isEnabled = !isHome && activeTab.webView.canGoBack
+        let canGoBack = activeTab.webView.canGoBack || activeTab.isDisplayingFailurePage || activeTab.sourceTabID != nil || activeTab.previousURL != nil
+        backButton.isEnabled = !isHome && canGoBack
         forwardButton.isEnabled = !isHome && activeTab.webView.canGoForward
         moreButton.isEnabled = true
         refreshButton.isEnabled = !isHome
@@ -575,7 +591,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         dismissKeyboard()
 
         isFullscreen = enabled
-        bottomPanel.isHidden = enabled
+        bottomBlurView.isHidden = enabled
 
         webTopSafeConstraint?.isActive = !enabled
         webTopFullscreenConstraint?.isActive = enabled
@@ -604,11 +620,16 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     }
 
     func tabRequestNewTab(url: URL) {
-        createNewTab(loadURL: url)
+        createNewTab(loadURL: url, sourceID: activeTab.id)
+    }
+
+    func tabRequestGoBack(_ tab: TabItem) {
+        goBack()
     }
 
     func tabProcessTerminated(_ tab: TabItem) {
         guard !tabs.isEmpty, tab.id == activeTab.id else { return }
+        resetProgress()
         let alert = UIAlertController(title: "页面被释放", message: "系统内存压力过大导致该页面已被释放，是否重新加载？", preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "恢复页面", style: .default) { [weak self] _ in
             self?.activeTab.webView.reload()
@@ -627,8 +648,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         }
 
         if !tab.isLoading {
-            progressView.alpha = 0
-            progressView.setProgress(0, animated: false)
+            resetProgress()
         }
 
         updateUIState()
@@ -639,8 +659,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             return
         }
 
-        progressView.alpha = 0
-        progressView.setProgress(0, animated: false)
+        resetProgress()
         updateUIState()
     }
 
@@ -780,7 +799,30 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     }
 
     @objc private func goBack() {
-        activeTab.webView.goBack()
+        if activeTab.isDisplayingFailurePage {
+            if activeTab.webView.canGoBack {
+                activeTab.webView.goBack()
+                return
+            }
+            if let sourceID = activeTab.sourceTabID, let sourceIndex = tabs.firstIndex(where: { $0.id == sourceID }) {
+                closeTab(at: activeTabIndex)
+                switchTab(to: sourceIndex)
+                return
+            }
+            if let prevURL = activeTab.previousURL {
+                load(url: prevURL)
+                return
+            }
+            showHomeUI()
+            return
+        }
+
+        if activeTab.webView.canGoBack {
+            activeTab.webView.goBack()
+        } else if let sourceID = activeTab.sourceTabID, let sourceIndex = tabs.firstIndex(where: { $0.id == sourceID }) {
+            closeTab(at: activeTabIndex)
+            switchTab(to: sourceIndex)
+        }
     }
 
     @objc private func goForward() {
@@ -846,7 +888,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         if matchingScripts.isEmpty {
             items.append(CustomBottomSheetItem(
-                title: "未匹配到任何脚本",
+                title: "未匹配到脚本",
                 handler: nil
             ))
         } else {
@@ -878,13 +920,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         ))
 
         let panel = CustomBottomSheetViewController(title: "正在运行的脚本", items: items)
-        let nav = UINavigationController(rootViewController: panel)
-        if #available(iOS 15.0, *) {
-            if let presentation = nav.sheetPresentationController {
-                presentation.detents = [.medium(), .large()]
-            }
-        }
-        present(nav, animated: true)
+        present(panel, animated: true)
     }
 
     private func showScriptSubMenu(for script: UserScript) {
@@ -938,13 +974,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         ))
 
         let panel = CustomBottomSheetViewController(title: script.name, items: items)
-        let nav = UINavigationController(rootViewController: panel)
-        if #available(iOS 15.0, *) {
-            if let presentation = nav.sheetPresentationController {
-                presentation.detents = [.medium(), .large()]
-            }
-        }
-        present(nav, animated: true)
+        present(panel, animated: true)
     }
 
     @objc private func showPluginManager() {
@@ -1038,14 +1068,8 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             }
         ))
 
-        let panel = CustomBottomSheetViewController(title: "浏览器选项", items: items)
-        let nav = UINavigationController(rootViewController: panel)
-        if #available(iOS 15.0, *) {
-            if let presentation = nav.sheetPresentationController {
-                presentation.detents = [.medium(), .large()]
-            }
-        }
-        present(nav, animated: true)
+        let panel = CustomBottomSheetViewController(title: "选项", items: items)
+        present(panel, animated: true)
     }
 
     private func showUserAgentManager() {
