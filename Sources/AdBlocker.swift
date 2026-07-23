@@ -18,6 +18,7 @@ final class AdBlockManager {
     private let ruleListIdentifier = "SimpleBrowserAdBlockRules"
 
     private(set) var compiledRuleList: WKContentRuleList?
+    private var attachedWebViews = NSHashTable<WKWebView>.weakObjects()
 
     var isEnabled: Bool {
         get { UserDefaults.standard.bool(forKey: enabledKey) }
@@ -82,10 +83,37 @@ final class AdBlockManager {
         recompileRules()
     }
 
+    func attach(to webView: WKWebView) {
+        attachedWebViews.add(webView)
+        applyRules(to: webView)
+    }
+
+    func detach(from webView: WKWebView) {
+        attachedWebViews.remove(webView)
+    }
+
+    func applyRules(to webView: WKWebView) {
+        let controller = webView.configuration.userContentController
+        controller.removeAllContentRuleLists()
+
+        guard isEnabled, let compiledRuleList = compiledRuleList else {
+            return
+        }
+
+        controller.add(compiledRuleList)
+    }
+
+    private func applyRulesToAttachedWebViews() {
+        for webView in attachedWebViews.allObjects {
+            applyRules(to: webView)
+        }
+    }
+
     private func loadCompiledRules() {
         WKContentRuleListStore.default().lookUpContentRuleList(forIdentifier: ruleListIdentifier) { [weak self] ruleList, _ in
             DispatchQueue.main.async {
                 self?.compiledRuleList = ruleList
+                self?.applyRulesToAttachedWebViews()
             }
         }
     }
@@ -135,6 +163,7 @@ final class AdBlockManager {
             DispatchQueue.main.async {
                 if let ruleList = ruleList {
                     self?.compiledRuleList = ruleList
+                    self?.applyRulesToAttachedWebViews()
                     completion?(true)
                 } else {
                     completion?(false)
@@ -164,7 +193,7 @@ final class AdBlockManager {
             let fileURL = getSubscriptionFileURL(id: sub.id)
             if let text = try? String(contentsOf: fileURL, encoding: .utf8) {
                 let lines = text.components(separatedBy: .newlines)
-                for line in lines.prefix(2000) {
+                for line in lines {
                     if let rule = parseEasyListLine(line) {
                         rulesArray.append(rule)
                     }
@@ -280,7 +309,7 @@ final class AdBlockManagerViewController: UIViewController, UITableViewDataSourc
 
     func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
         if section == 0 { return "总开关" }
-        if section == 1 { return "规则订阅 (EasyList)" }
+        if section == 1 { return "规则订阅" }
         if section == 2 { return "自定义规则" }
         return nil
     }
@@ -314,8 +343,8 @@ final class AdBlockManagerViewController: UIViewController, UITableViewDataSourc
                 cell.accessoryType = .none
             }
         } else {
-            cell.textLabel?.text = "编辑自定义拦截规则"
-            cell.detailTextLabel?.text = "支持 EasyList / ABP 规则语法"
+            cell.textLabel?.text = "编辑自定义过滤规则"
+            cell.detailTextLabel?.text = "支持基础域名拦截与 CSS 隐藏规则"
             cell.accessoryType = .disclosureIndicator
         }
 
@@ -419,7 +448,7 @@ final class AdBlockManagerViewController: UIViewController, UITableViewDataSourc
     }
 
     private func showAddSubscriptionAlert() {
-        let alert = UIAlertController(title: "添加规则订阅", message: "请输入 EasyList 格式的规则订阅地址", preferredStyle: .alert)
+        let alert = UIAlertController(title: "添加规则订阅", message: "请输入规则订阅地址", preferredStyle: .alert)
         alert.addTextField { tf in tf.placeholder = "订阅名称 (如: EasyList)" }
         alert.addTextField { tf in tf.placeholder = "URL (https://...)" }
 
@@ -458,7 +487,7 @@ final class CustomRuleEditorViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "自定义规则"
+        title = "自定义过滤规则"
         view.backgroundColor = .systemGroupedBackground
 
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "保存", style: .done, target: self, action: #selector(handleSave))
