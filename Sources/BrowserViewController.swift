@@ -166,6 +166,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
                     self?.activeTab.reloadUserScripts()
                 })
 
+                alert.addAction(UIAlertAction(title: "取消", style: .cancel))
                 self?.present(alert, animated: true)
             }
         }
@@ -680,6 +681,11 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             return
         }
 
+        UIView.animate(withDuration: 0.2) {
+            self.progressView.alpha = 0
+            self.progressView.progress = 0
+        }
+
         updateUIState()
         showLoadError(error)
     }
@@ -1093,27 +1099,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     }
 
     private func performCleanData(options: Set<CleanOption>) {
-        if options.contains(.cache) {
-            let cacheTypes: Set<String> = [
-                WKWebsiteDataTypeFetchCache,
-                WKWebsiteDataTypeDiskCache,
-                WKWebsiteDataTypeMemoryCache,
-                WKWebsiteDataTypeOfflineWebApplicationCache
-            ]
-            WKWebsiteDataStore.default().removeData(ofTypes: cacheTypes, modifiedSince: .distantPast) {}
-        }
-
-        if options.contains(.cookies) {
-            let store = WKWebsiteDataStore.default().httpCookieStore
-            store.getAllCookies { cookies in
-                for cookie in cookies {
-                    if !CookieLockStore.shared.isLocked(domain: cookie.domain) {
-                        store.delete(cookie)
-                    }
-                }
-            }
-        }
-
         if options.contains(.searchHistory) {
             SearchHistoryStore.shared.clearHistory()
         }
@@ -1122,8 +1107,23 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             ScriptDataStore.shared.clearAllScriptData()
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-            self?.activeTab.webView.reload()
+        if options.contains(.cache) || options.contains(.cookies) {
+            let types = WKWebsiteDataStore.allWebsiteDataTypes()
+            WKWebsiteDataStore.default().fetchDataRecords(ofTypes: types) { records in
+                let unlockedRecords = records.filter { !CookieLockStore.shared.isLocked(domain: $0.displayName) }
+                WKWebsiteDataStore.default().removeData(ofTypes: types, for: unlockedRecords) {
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self = self else { return }
+                        if self.homeView.alpha < 0.5, self.activeTab.url != nil {
+                            self.activeTab.webView.reload()
+                        }
+                    }
+                }
+            }
+        } else {
+            if homeView.alpha < 0.5, activeTab.url != nil {
+                activeTab.webView.reload()
+            }
         }
     }
 }
