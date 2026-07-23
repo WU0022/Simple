@@ -1031,14 +1031,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             activeTab.clearFailureState()
             failureOverlayView.isHidden = true
 
-            if let currentURL = activeTab.webView.url, currentURL.absoluteString != "about:blank", currentURL != activeTab.failedURL {
-                activeTab.url = currentURL
-                let rawString = currentURL.absoluteString.removingPercentEncoding ?? currentURL.absoluteString
-                addressField.text = currentURL.host?.removingPercentEncoding ?? currentURL.host ?? rawString
-                updateUIState()
-                return
-            }
-
             if activeTab.webView.canGoBack {
                 activeTab.webView.goBack()
                 updateUIState()
@@ -1319,7 +1311,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     private func showAdBlockerManager() {
         let manager = AdBlockManagerViewController()
         manager.onRulesChanged = { [weak self] in
-            self?.activeTab.webView.reload()
+            self?.tabs.forEach { $0.webView.reload() }
         }
         let nav = UINavigationController(rootViewController: manager)
         present(nav, animated: true)
