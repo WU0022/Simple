@@ -42,31 +42,15 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         let isDesktop = UserAgentStore.shared.getSelectedId() == "default_mac"
         configuration.defaultWebpagePreferences.preferredContentMode = isDesktop ? .desktop : .mobile
 
-        AdBlockManager.shared.applyRulesToConfiguration(configuration)
-
-        let userContentController = configuration.userContentController
-
-        let autoFullscreenScript = """
-        (function() {
-            document.addEventListener('play', function(e) {
-                if (e.target && e.target.tagName === 'VIDEO') {
-                    var v = e.target;
-                    if (v.webkitEnterFullscreen) {
-                        v.webkitEnterFullscreen();
-                    } else if (v.requestFullscreen) {
-                        v.requestFullscreen().catch(function(){});
-                    }
-                }
-            }, true);
-        })();
-        """
-        userContentController.addUserScript(WKUserScript(source: autoFullscreenScript, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
+        let userContentController = WKUserContentController()
+        configuration.userContentController = userContentController
 
         webView = WKWebView(frame: .zero, configuration: configuration)
         super.init()
 
         webView.customUserAgent = UserAgentStore.shared.getSelectedUA()
 
+        AdBlockManager.shared.attach(to: webView)
         userContentController.add(self, name: "GM")
 
         webView.navigationDelegate = self
@@ -84,6 +68,7 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
     }
 
     func destroy() {
+        AdBlockManager.shared.detach(from: webView)
         delegate = nil
         webView.navigationDelegate = nil
         webView.uiDelegate = nil
