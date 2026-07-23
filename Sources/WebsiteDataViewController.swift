@@ -48,7 +48,7 @@ final class WebsiteDataManagerViewController: UITableViewController, UISearchRes
     }
 
     @objc private func handleCleanAllCaches() {
-        let alert = UIAlertController(title: "清理未锁定网站数据", message: "将清理所有未锁定网站的缓存与本地数据，受保护(🔒)网站的数据将被保留。", preferredStyle: .actionSheet)
+        let alert = UIAlertController(title: "清理未锁定网站数据", message: "将清理所有未锁定网站的缓存与本地数据，受保护网站的数据将被保留。", preferredStyle: .actionSheet)
         alert.addAction(UIAlertAction(title: "清理未锁定数据", style: .default) { [weak self] _ in
             WebsiteCleaner.shared.cleanUnprotectedLoginAndData {
                 self?.loadData()
@@ -69,14 +69,17 @@ final class WebsiteDataManagerViewController: UITableViewController, UISearchRes
 
         var content = cell.defaultContentConfiguration()
         content.text = record.displayName
-        if isLocked {
-            content.image = UIImage(systemName: "lock.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 13, weight: .regular))
-            content.imageProperties.tintColor = .secondaryLabel
-        } else {
-            content.image = nil
-        }
         cell.contentConfiguration = content
         cell.selectionStyle = .none
+
+        if isLocked {
+            let lockView = UIImageView(image: UIImage(systemName: "lock.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)))
+            lockView.tintColor = .secondaryLabel
+            cell.accessoryView = lockView
+        } else {
+            cell.accessoryView = nil
+        }
+
         return cell
     }
 
