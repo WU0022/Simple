@@ -157,7 +157,7 @@ final class EyeProtectionManager {
     private let levelKey = "eye_protection_level_v2"
     private var overlayView: UIView?
 
-    private enum Level: Int, CaseIterable {
+    enum Level: Int, CaseIterable {
         case low = 0
         case medium = 1
         case high = 2
@@ -183,29 +183,14 @@ final class EyeProtectionManager {
                 return "高强度"
             }
         }
-
-        var next: Level {
-            switch self {
-            case .low:
-                return .medium
-            case .medium:
-                return .high
-            case .high:
-                return .low
-            }
-        }
     }
 
     var isEnabled: Bool {
-        get {
-            UserDefaults.standard.bool(forKey: enabledKey)
-        }
-        set {
-            UserDefaults.standard.set(newValue, forKey: enabledKey)
-        }
+        get { UserDefaults.standard.bool(forKey: enabledKey) }
+        set { UserDefaults.standard.set(newValue, forKey: enabledKey) }
     }
 
-    private var level: Level {
+    var level: Level {
         get {
             Level(rawValue: UserDefaults.standard.integer(forKey: levelKey)) ?? .medium
         }
@@ -223,7 +208,6 @@ final class EyeProtectionManager {
 
     func toggle(in window: UIWindow?) {
         isEnabled.toggle()
-
         if isEnabled {
             applyOverlay(in: window)
         } else {
@@ -231,26 +215,20 @@ final class EyeProtectionManager {
         }
     }
 
-    func advanceLevel(in window: UIWindow?) -> String {
-        level = level.next
-
+    func setLevel(_ newLevel: Level, in window: UIWindow?) {
+        level = newLevel
         if isEnabled {
             applyOverlay(in: window)
         }
-
-        return level.title
     }
 
     private func applyOverlay(in window: UIWindow?) {
         removeOverlay()
-
         guard let window = window else { return }
-
         let overlay = UIView(frame: window.bounds)
         overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         overlay.backgroundColor = UIColor.black.withAlphaComponent(level.alpha)
         overlay.isUserInteractionEnabled = false
-
         window.addSubview(overlay)
         overlayView = overlay
     }
