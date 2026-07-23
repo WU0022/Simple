@@ -10,6 +10,8 @@ targets:
     type: application
     platform: iOS
     deploymentTarget: "15.0"
+    info:
+      path: Info.plist
     sources:
       - path: Sources
       - path: Resources
@@ -20,8 +22,8 @@ targets:
         PRODUCT_NAME: SimpleBrowser
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1"
-        INFOPLIST_FILE: Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: NO
         CODE_SIGNING_ALLOWED: NO
         CODE_SIGNING_REQUIRED: NO
         CODE_SIGN_IDENTITY: ""
