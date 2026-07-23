@@ -790,11 +790,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             }
         }
 
-        if let encodedQuery = value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
-            return URL(string: "https://www.google.com/search?q=\(encodedQuery)")
-        }
-
-        return nil
+        return SearchEngineStore.shared.currentEngine.searchURL(query: value)
     }
 
     private func setFullscreen(_ enabled: Bool) {
@@ -1034,6 +1030,14 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
             activeTab.clearFailureState()
             failureOverlayView.isHidden = true
+
+            if let currentURL = activeTab.webView.url, currentURL.absoluteString != "about:blank", currentURL != activeTab.failedURL {
+                activeTab.url = currentURL
+                let rawString = currentURL.absoluteString.removingPercentEncoding ?? currentURL.absoluteString
+                addressField.text = currentURL.host?.removingPercentEncoding ?? currentURL.host ?? rawString
+                updateUIState()
+                return
+            }
 
             if activeTab.webView.canGoBack {
                 activeTab.webView.goBack()
@@ -1299,6 +1303,19 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         present(alert, animated: true)
     }
 
+    private func showSearchEnginePicker() {
+        let alert = UIAlertController(title: "选择默认搜索引擎", message: nil, preferredStyle: .actionSheet)
+        for engine in SearchEngine.allCases {
+            let isCurrent = engine == SearchEngineStore.shared.currentEngine
+            let title = isCurrent ? "\(engine.name) ✓" : engine.name
+            alert.addAction(UIAlertAction(title: title, style: .default) { _ in
+                SearchEngineStore.shared.currentEngine = engine
+            })
+        }
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        present(alert, animated: true)
+    }
+
     @objc private func showMoreMenu() {
         dismissKeyboard()
 
@@ -1320,6 +1337,14 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             },
             longPressHandler: { [weak self] in
                 self?.showEyeProtectionLevelPicker()
+            }
+        ))
+
+        let currentEngine = SearchEngineStore.shared.currentEngine
+        items.append(CustomBottomSheetItem(
+            title: "搜索引擎: \(currentEngine.name)",
+            handler: { [weak self] in
+                self?.showSearchEnginePicker()
             }
         ))
 
