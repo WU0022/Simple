@@ -17,8 +17,9 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 }
 
-final class TouchButton: UIButton {
+class TouchButton: UIButton {
     private let hapticGenerator = UIImpactFeedbackGenerator(style: .medium)
+    var hitTestInsets: UIEdgeInsets = .zero
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -28,6 +29,14 @@ final class TouchButton: UIButton {
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         setupFeedback()
+    }
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        if hitTestInsets == .zero {
+            return super.point(inside: point, with: event)
+        }
+        let enlargedBounds = bounds.inset(by: hitTestInsets)
+        return enlargedBounds.contains(point)
     }
 
     private func setupFeedback() {
@@ -150,7 +159,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         let task = URLSession.shared.dataTask(with: scriptURL) { [weak self] data, response, error in
             guard let data = data, let code = String(data: data, encoding: .utf8), !code.isEmpty else { return }
-            let (parsedName, parsedMatch, parsedIcon) = UserScriptStore.shared.parseMetadata(from: code)
+            let (parsedName, parsedMatch) = UserScriptStore.shared.parseMetadata(from: code)
 
             DispatchQueue.main.async {
                 let alert = UIAlertController(
@@ -166,8 +175,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
                         name: parsedName,
                         matchPattern: parsedMatch,
                         code: code,
-                        isEnabled: true,
-                        iconURL: parsedIcon
+                        isEnabled: true
                     )
                     scripts.append(newScript)
                     UserScriptStore.shared.saveScripts(scripts)
@@ -291,10 +299,11 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         lockButton.setImage(
             UIImage(
                 systemName: "lock.fill",
-                withConfiguration: UIImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+                withConfiguration: UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
             ),
             for: .normal
         )
+        lockButton.hitTestInsets = UIEdgeInsets(top: -10, left: -10, bottom: -10, right: -10)
         lockButton.addTarget(self, action: #selector(showSiteDomainSettings), for: .touchUpInside)
 
         addressField.translatesAutoresizingMaskIntoConstraints = false
@@ -349,9 +358,9 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         configureToolbarButton(backButton, imageName: "chevron.left", action: #selector(goBack))
         configureToolbarButton(forwardButton, imageName: "chevron.right", action: #selector(goForward))
-        configureToolbarButton(pluginButton, imageName: "square.3.layers.3d", action: #selector(showPluginPanel))
-        configureToolbarButton(tabsButton, imageName: "square.on.square", action: #selector(showTabsManager))
         configureToolbarButton(moreButton, imageName: "line.3.horizontal", action: #selector(showMoreMenu))
+        configureToolbarButton(tabsButton, imageName: "square.on.square", action: #selector(showTabsManager))
+        configureToolbarButton(pluginButton, imageName: "square.3.layers.3d", action: #selector(showPluginPanel))
 
         let longPressMore = UILongPressGestureRecognizer(target: self, action: #selector(handleMoreButtonLongPress(_:)))
         longPressMore.minimumPressDuration = 0.4
@@ -359,9 +368,9 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         navigationStack.addArrangedSubview(backButton)
         navigationStack.addArrangedSubview(forwardButton)
-        navigationStack.addArrangedSubview(pluginButton)
-        navigationStack.addArrangedSubview(tabsButton)
         navigationStack.addArrangedSubview(moreButton)
+        navigationStack.addArrangedSubview(tabsButton)
+        navigationStack.addArrangedSubview(pluginButton)
 
         addressContainer.addSubview(lockButton)
         addressContainer.addSubview(addressField)
@@ -493,9 +502,10 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
     private func configureToolbarButton(_ button: TouchButton, imageName: String, action: Selector?) {
         var configuration = UIButton.Configuration.plain()
+        let size: CGFloat = imageName == "line.3.horizontal" ? 16 : 18
         configuration.image = UIImage(
             systemName: imageName,
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .regular)
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: size, weight: .regular)
         )
         configuration.baseForegroundColor = .label
         configuration.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 6, bottom: 6, trailing: 6)
@@ -607,6 +617,16 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         let nextIndex = min(index, tabs.count - 1)
         activeTabIndex = min(activeTabIndex, tabs.count - 1)
         switchTab(to: nextIndex)
+    }
+
+    private func closeAllTabs() {
+        resetProgress()
+        for tab in tabs {
+            tab.destroy()
+        }
+        tabs.removeAll()
+        activeTabIndex = 0
+        createNewTab(loadURL: nil)
     }
 
     private func bindProgressObservation(to webView: WKWebView) {
@@ -1181,6 +1201,10 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
             manager.onCloseTab = { [weak self] index in
                 self?.closeTab(at: index)
+            }
+
+            manager.onClearAllTabs = { [weak self] in
+                self?.closeAllTabs()
             }
 
             manager.onNewTab = { [weak self] in
