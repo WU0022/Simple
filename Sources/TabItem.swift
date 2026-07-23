@@ -39,6 +39,11 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         configuration.mediaTypesRequiringUserActionForPlayback = .all
         configuration.allowsPictureInPictureMediaPlayback = true
 
+        if #available(iOS 13.0, *) {
+            let isDesktop = UserAgentStore.shared.getSelectedId() == "default_mac"
+            configuration.defaultWebpagePreferences.preferredContentMode = isDesktop ? .desktop : .mobile
+        }
+
         let userContentController = WKUserContentController()
         configuration.userContentController = userContentController
 
@@ -309,7 +314,7 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
     }
 
     func updateSnapshot(completion: (() -> Void)? = nil) {
-        guard webView.bounds.width > 0, webView.bounds.height > 0 else {
+        guard webView.bounds.width > 0, webView.bounds.height > 0, !webView.isLoading else {
             completion?()
             return
         }
@@ -318,7 +323,9 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         configuration.rect = webView.bounds
 
         webView.takeSnapshot(with: configuration) { [weak self] image, _ in
-            self?.snapshot = image
+            if let image = image {
+                self?.snapshot = image
+            }
             completion?()
         }
     }
@@ -364,6 +371,10 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         if !hasInjectedScriptsForCurrentPage {
             hasInjectedScriptsForCurrentPage = true
             injectAndRunUserScripts()
+        }
+        DispatchQueue.main.async { [weak webView] in
+            webView?.setNeedsLayout()
+            webView?.layoutIfNeeded()
         }
         updateSnapshot()
         delegate?.tabDidUpdate(self)
