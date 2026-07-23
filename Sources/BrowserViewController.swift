@@ -694,9 +694,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
     private func load(url: URL) {
         showBrowserUI()
-        let rawString = url.absoluteString.removingPercentEncoding ?? url.absoluteString
-        let hostString = url.host?.removingPercentEncoding ?? url.host ?? rawString
-        addressField.text = hostString
+        addressField.text = url.absoluteString.removingPercentEncoding ?? url.absoluteString
         activeTab.webView.load(URLRequest(url: url))
     }
 
@@ -1285,14 +1283,14 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     }
 
     private func showEyeProtectionLevelPicker() {
-        let alert = UIAlertController(title: "护眼模式强度", message: "请选择护眼盖层透明度强度", preferredStyle: .actionSheet)
+        let alert = UIAlertController(title: "护眼模式强度", message: nil, preferredStyle: .actionSheet)
+
         for level in EyeProtectionManager.Level.allCases {
-            let action = UIAlertAction(title: level.title, style: .default) { [weak self] _ in
+            alert.addAction(UIAlertAction(title: level.title, style: .default) { [weak self] _ in
                 EyeProtectionManager.shared.setLevel(level, in: self?.view.window)
-                self?.showToastNotice("护眼强度：\(level.title)")
-            }
-            alert.addAction(action)
+            })
         }
+
         alert.addAction(UIAlertAction(title: "取消", style: .cancel))
         present(alert, animated: true)
     }
@@ -1333,14 +1331,11 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         items.append(CustomBottomSheetItem(
             title: isDesktop ? "移动版" : "电脑版",
             handler: { [weak self] in
+                guard let self = self else { return }
                 let targetId = isDesktop ? "default_safari" : "default_mac"
                 UserAgentStore.shared.setSelectedId(targetId)
-                let newUA = UserAgentStore.shared.getSelectedUA()
-                self?.activeTab.webView.customUserAgent = newUA
-                if #available(iOS 13.0, *) {
-                    self?.activeTab.webView.configuration.defaultWebpagePreferences.preferredContentMode = (targetId == "default_mac") ? .desktop : .mobile
-                }
-                self?.activeTab.webView.reload()
+                self.activeTab.webView.customUserAgent = UserAgentStore.shared.getSelectedUA()
+                self.activeTab.webView.reloadFromOrigin()
             }
         ))
 
