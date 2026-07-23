@@ -133,6 +133,12 @@ final class CustomBottomSheetViewController: UIViewController {
         card.tag = tag
         card.addTarget(self, action: #selector(handleItemTap(_:)), for: .touchUpInside)
 
+        if item.longPressHandler != nil {
+            let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleItemLongPress(_:)))
+            longPress.minimumPressDuration = 0.5
+            card.addGestureRecognizer(longPress)
+        }
+
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
         label.font = .systemFont(ofSize: 15, weight: .medium)
@@ -151,6 +157,21 @@ final class CustomBottomSheetViewController: UIViewController {
         ])
 
         return card
+    }
+
+    @objc private func handleItemLongPress(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began else { return }
+
+        let tag = gesture.view?.tag ?? 0
+        guard tag < items.count else { return }
+        let item = items[tag]
+        guard let handler = item.longPressHandler else { return }
+
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+
+        dismiss(animated: true) {
+            handler()
+        }
     }
 
     @objc private func handleItemTap(_ sender: UIButton) {
