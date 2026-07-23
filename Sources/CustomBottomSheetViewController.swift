@@ -33,18 +33,20 @@ final class CustomBottomSheetViewController: UIViewController {
         closeButton.setImage(UIImage(systemName: "xmark.circle.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .medium)), for: .normal)
         closeButton.addTarget(self, action: #selector(handleDismiss), for: .touchUpInside)
 
-        let contentContainer = UIView()
-        contentContainer.translatesAutoresizingMaskIntoConstraints = false
+        let scrollView = UIScrollView()
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.alwaysBounceVertical = true
+        scrollView.showsVerticalScrollIndicator = false
 
         if layout == .grid {
-            setupGridLayout(in: contentContainer)
+            setupGridLayout(in: scrollView)
         } else {
-            setupListLayout(in: contentContainer)
+            setupListLayout(in: scrollView)
         }
 
         view.addSubview(titleLabel)
         view.addSubview(closeButton)
-        view.addSubview(contentContainer)
+        view.addSubview(scrollView)
 
         NSLayoutConstraint.activate([
             titleLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
@@ -55,24 +57,21 @@ final class CustomBottomSheetViewController: UIViewController {
             closeButton.widthAnchor.constraint(equalToConstant: 28),
             closeButton.heightAnchor.constraint(equalToConstant: 28),
 
-            contentContainer.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 16),
-            contentContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            contentContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            contentContainer.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16)
+            scrollView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 16),
+            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            scrollView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16)
         ])
     }
 
-    private func setupGridLayout(in container: UIView) {
+    private func setupGridLayout(in scrollView: UIScrollView) {
         let mainStack = UIStackView()
         mainStack.translatesAutoresizingMaskIntoConstraints = false
         mainStack.axis = .vertical
         mainStack.spacing = 10
 
-        let gridItems = items.filter { !$0.isDestructive }
-        let destructiveItems = items.filter { $0.isDestructive }
-
         var rowStack: UIStackView?
-        for (idx, item) in gridItems.enumerated() {
+        for (idx, item) in items.enumerated() {
             if idx % 2 == 0 {
                 rowStack = UIStackView()
                 rowStack?.axis = .horizontal
@@ -85,27 +84,22 @@ final class CustomBottomSheetViewController: UIViewController {
             rowStack?.addArrangedSubview(card)
         }
 
-        if gridItems.count % 2 != 0 {
+        if items.count % 2 != 0 {
             let spacer = UIView()
             rowStack?.addArrangedSubview(spacer)
         }
 
-        for item in destructiveItems {
-            let idx = items.firstIndex(where: { $0.title == item.title }) ?? 0
-            let card = createCardButton(item: item, tag: idx, height: 48)
-            mainStack.addArrangedSubview(card)
-        }
-
-        container.addSubview(mainStack)
+        scrollView.addSubview(mainStack)
         NSLayoutConstraint.activate([
-            mainStack.topAnchor.constraint(equalTo: container.topAnchor),
-            mainStack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            mainStack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            mainStack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor)
+            mainStack.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
+            mainStack.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor),
+            mainStack.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor),
+            mainStack.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
+            mainStack.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor)
         ])
     }
 
-    private func setupListLayout(in container: UIView) {
+    private func setupListLayout(in scrollView: UIScrollView) {
         let itemsStack = UIStackView()
         itemsStack.translatesAutoresizingMaskIntoConstraints = false
         itemsStack.axis = .vertical
@@ -116,12 +110,13 @@ final class CustomBottomSheetViewController: UIViewController {
             itemsStack.addArrangedSubview(card)
         }
 
-        container.addSubview(itemsStack)
+        scrollView.addSubview(itemsStack)
         NSLayoutConstraint.activate([
-            itemsStack.topAnchor.constraint(equalTo: container.topAnchor),
-            itemsStack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            itemsStack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            itemsStack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor)
+            itemsStack.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
+            itemsStack.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor),
+            itemsStack.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor),
+            itemsStack.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
+            itemsStack.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor)
         ])
     }
 
@@ -141,7 +136,7 @@ final class CustomBottomSheetViewController: UIViewController {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
         label.font = .systemFont(ofSize: 15, weight: .medium)
-        label.textColor = item.isDestructive ? .systemRed : .label
+        label.textColor = .label
         label.text = item.title
         label.textAlignment = .center
         label.numberOfLines = 1
