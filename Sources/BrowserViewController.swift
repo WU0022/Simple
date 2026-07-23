@@ -504,7 +504,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
     @objc private func handleAddressLongPress(_ gesture: UILongPressGestureRecognizer) {
         guard gesture.state == .began else { return }
-        let urlText = activeTab.url?.absoluteString ?? addressField.text ?? ""
+        let urlText = activeTab.url?.absoluteString.removingPercentEncoding ?? activeTab.url?.absoluteString ?? addressField.text ?? ""
         guard !urlText.isEmpty else { return }
 
         UIPasteboard.general.string = urlText
@@ -633,7 +633,9 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             showFailureUI(for: tab)
         } else if let url = tab.url {
             showBrowserUI()
-            addressField.text = url.host ?? url.absoluteString
+            let rawString = url.absoluteString.removingPercentEncoding ?? url.absoluteString
+            let hostString = url.host?.removingPercentEncoding ?? url.host ?? rawString
+            addressField.text = hostString
         } else {
             showHomeUI()
         }
@@ -692,7 +694,9 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
     private func load(url: URL) {
         showBrowserUI()
-        addressField.text = url.host ?? url.absoluteString
+        let rawString = url.absoluteString.removingPercentEncoding ?? url.absoluteString
+        let hostString = url.host?.removingPercentEncoding ?? url.host ?? rawString
+        addressField.text = hostString
         activeTab.webView.load(URLRequest(url: url))
     }
 
@@ -717,12 +721,14 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         homeView.alpha = 0
         webContainer.alpha = 1
         failureOverlayView.isHidden = false
-        failureURLLabel.text = tab.failedURL?.absoluteString ?? tab.url?.absoluteString ?? ""
+        let targetURL = tab.failedURL ?? tab.url
+        failureURLLabel.text = targetURL?.absoluteString.removingPercentEncoding ?? targetURL?.absoluteString ?? ""
         if let err = tab.failureError as NSError? {
             failureTitleLabel.text = "无法连接服务器"
             failureReasonLabel.text = err.localizedDescription
         }
-        addressField.text = tab.failedURL?.host ?? tab.failedURL?.absoluteString ?? ""
+        let hostStr = targetURL?.host?.removingPercentEncoding ?? targetURL?.host ?? (targetURL?.absoluteString.removingPercentEncoding ?? targetURL?.absoluteString ?? "")
+        addressField.text = hostStr
         resetProgress()
         updateUIState()
     }
@@ -849,7 +855,9 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         if !tab.isDisplayingFailurePage {
             failureOverlayView.isHidden = true
             if let url = tab.url, !addressField.isFirstResponder {
-                addressField.text = url.host ?? url.absoluteString
+                let rawString = url.absoluteString.removingPercentEncoding ?? url.absoluteString
+                let hostString = url.host?.removingPercentEncoding ?? url.host ?? rawString
+                addressField.text = hostString
             }
         }
 
@@ -870,7 +878,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
     func textFieldDidBeginEditing(_ textField: UITextField) {
         if let url = activeTab.url {
-            textField.text = url.absoluteString
+            textField.text = url.absoluteString.removingPercentEncoding ?? url.absoluteString
         }
 
         navigationStack.isHidden = true
@@ -888,7 +896,8 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
     func textFieldDidEndEditing(_ textField: UITextField) {
         if let url = activeTab.url {
-            textField.text = url.host ?? url.absoluteString
+            let rawString = url.absoluteString.removingPercentEncoding ?? url.absoluteString
+            textField.text = url.host?.removingPercentEncoding ?? url.host ?? rawString
         } else if textField.text?.isEmpty == true {
             textField.text = ""
         }
@@ -1023,7 +1032,8 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
             if let originURL = originURL {
                 activeTab.url = originURL
-                addressField.text = originURL.host ?? originURL.absoluteString
+                let rawString = originURL.absoluteString.removingPercentEncoding ?? originURL.absoluteString
+                addressField.text = originURL.host?.removingPercentEncoding ?? originURL.host ?? rawString
                 updateUIState()
                 return
             }
@@ -1274,6 +1284,19 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         }
     }
 
+    private func showEyeProtectionLevelPicker() {
+        let alert = UIAlertController(title: "护眼模式强度", message: "请选择护眼盖层透明度强度", preferredStyle: .actionSheet)
+        for level in EyeProtectionManager.Level.allCases {
+            let action = UIAlertAction(title: level.title, style: .default) { [weak self] _ in
+                EyeProtectionManager.shared.setLevel(level, in: self?.view.window)
+                self?.showToastNotice("护眼强度：\(level.title)")
+            }
+            alert.addAction(action)
+        }
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        present(alert, animated: true)
+    }
+
     @objc private func showMoreMenu() {
         dismissKeyboard()
 
@@ -1294,8 +1317,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
                 EyeProtectionManager.shared.toggle(in: self?.view.window)
             },
             longPressHandler: { [weak self] in
-                let levelName = EyeProtectionManager.shared.advanceLevel(in: self?.view.window)
-                self?.showToastNotice("护眼强度：\(levelName)")
+                self?.showEyeProtectionLevelPicker()
             }
         ))
 
@@ -1315,6 +1337,9 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
                 UserAgentStore.shared.setSelectedId(targetId)
                 let newUA = UserAgentStore.shared.getSelectedUA()
                 self?.activeTab.webView.customUserAgent = newUA
+                if #available(iOS 13.0, *) {
+                    self?.activeTab.webView.configuration.defaultWebpagePreferences.preferredContentMode = (targetId == "default_mac") ? .desktop : .mobile
+                }
                 self?.activeTab.webView.reload()
             }
         ))
