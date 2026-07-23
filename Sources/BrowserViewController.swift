@@ -925,6 +925,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         if activeTab.isDisplayingFailurePage {
             activeTab.isDisplayingFailurePage = false
             failureOverlayView.isHidden = true
+
             if activeTab.webView.canGoBack {
                 activeTab.webView.goBack()
                 return
@@ -939,6 +940,10 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
                 switchTab(to: sourceIndex)
                 return
             }
+            if tabs.count > 1 {
+                closeTab(at: activeTabIndex)
+                return
+            }
             showHomeUI()
             return
         }
@@ -951,6 +956,8 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             let closingIndex = activeTabIndex
             closeTab(at: closingIndex)
             switchTab(to: sourceIndex)
+        } else if tabs.count > 1 {
+            closeTab(at: activeTabIndex)
         } else {
             showHomeUI()
         }
