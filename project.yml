@@ -4,7 +4,6 @@ options:
   bundleIdPrefix: com.example
   xcodeVersion: "15.0"
   minimumXcodeVersion: "15.0"
-  objectVersion: 56
 
 targets:
   SimpleBrowser:
