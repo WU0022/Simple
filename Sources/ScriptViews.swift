@@ -7,61 +7,138 @@ struct CustomBottomSheetItem {
     let handler: (() -> Void)?
 }
 
-final class CustomBottomSheetViewController: UITableViewController {
+final class CustomBottomSheetViewController: UIViewController {
     private let titleString: String
     private let items: [CustomBottomSheetItem]
+
+    private let dimmingView = UIView()
+    private let containerView = UIView()
 
     init(title: String, items: [CustomBottomSheetItem]) {
         self.titleString = title
         self.items = items
-        super.init(style: .insetGrouped)
+        super.init(nibName: nil, bundle: nil)
+        modalPresentationStyle = .overFullScreen
+        modalTransitionStyle = .crossDissolve
     }
 
     required init?(coder: NSCoder) { nil }
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        self.title = titleString
-        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "SheetCell")
-        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "完成", style: .done, target: self, action: #selector(handleClose))
+        setupViews()
     }
 
-    @objc private func handleClose() {
-        dismiss(animated: true)
-    }
+    private func setupViews() {
+        view.backgroundColor = .clear
 
-    override func numberOfSections(in tableView: UITableView) -> Int {
-        return 1
-    }
+        dimmingView.translatesAutoresizingMaskIntoConstraints = false
+        dimmingView.backgroundColor = UIColor.black.withAlphaComponent(0.4)
+        let tapDimming = UITapGestureRecognizer(target: self, action: #selector(handleDismiss))
+        dimmingView.addGestureRecognizer(tapDimming)
 
-    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        return items.count
-    }
+        containerView.translatesAutoresizingMaskIntoConstraints = false
+        containerView.backgroundColor = .secondarySystemGroupedBackground
+        containerView.layer.cornerRadius = 20
+        containerView.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        containerView.clipsToBounds = true
 
-    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: "SheetCell", for: indexPath)
-        let item = items[indexPath.row]
+        let handleBar = UIView()
+        handleBar.translatesAutoresizingMaskIntoConstraints = false
+        handleBar.backgroundColor = .systemGray4
+        handleBar.layer.cornerRadius = 2.5
 
-        var content = cell.defaultContentConfiguration()
-        content.text = item.title
-        content.textProperties.alignment = .center
+        let titleLabel = UILabel()
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(ofSize: 16, weight: .semibold)
+        titleLabel.textColor = .label
+        titleLabel.text = titleString
 
-        if item.isDestructive {
-            content.textProperties.color = .systemRed
-        } else {
-            content.textProperties.color = .label
+        let closeButton = TouchButton(type: .system)
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.tintColor = .tertiaryLabel
+        closeButton.setImage(UIImage(systemName: "xmark.circle.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .medium)), for: .normal)
+        closeButton.addTarget(self, action: #selector(handleDismiss), for: .touchUpInside)
+
+        let itemsStack = UIStackView()
+        itemsStack.translatesAutoresizingMaskIntoConstraints = false
+        itemsStack.axis = .vertical
+        itemsStack.spacing = 8
+
+        for (idx, item) in items.enumerated() {
+            let row = TouchButton(type: .custom)
+            row.backgroundColor = .systemBackground
+            row.layer.cornerRadius = 12
+            row.clipsToBounds = true
+            row.tag = idx
+            row.addTarget(self, action: #selector(handleItemTap(_:)), for: .touchUpInside)
+
+            let label = UILabel()
+            label.translatesAutoresizingMaskIntoConstraints = false
+            label.font = .systemFont(ofSize: 15, weight: .medium)
+            label.textColor = item.isDestructive ? .systemRed : .label
+            label.text = item.title
+            label.textAlignment = .center
+
+            row.addSubview(label)
+            NSLayoutConstraint.activate([
+                row.heightAnchor.constraint(equalToConstant: 48),
+                label.centerXAnchor.constraint(equalTo: row.centerXAnchor),
+                label.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+                label.leadingAnchor.constraint(greaterThanOrEqualTo: row.leadingAnchor, constant: 12),
+                label.trailingAnchor.constraint(lessThanOrEqualTo: row.trailingAnchor, constant: -12)
+            ])
+
+            itemsStack.addArrangedSubview(row)
         }
 
-        cell.contentConfiguration = content
-        return cell
+        containerView.addSubview(handleBar)
+        containerView.addSubview(titleLabel)
+        containerView.addSubview(closeButton)
+        containerView.addSubview(itemsStack)
+
+        view.addSubview(dimmingView)
+        view.addSubview(containerView)
+
+        NSLayoutConstraint.activate([
+            dimmingView.topAnchor.constraint(equalTo: view.topAnchor),
+            dimmingView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            dimmingView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            dimmingView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+
+            containerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            containerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            containerView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+
+            handleBar.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 8),
+            handleBar.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
+            handleBar.widthAnchor.constraint(equalToConstant: 36),
+            handleBar.heightAnchor.constraint(equalToConstant: 5),
+
+            titleLabel.topAnchor.constraint(equalTo: handleBar.bottomAnchor, constant: 12),
+            titleLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
+
+            closeButton.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -14),
+            closeButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+            closeButton.widthAnchor.constraint(equalToConstant: 28),
+            closeButton.heightAnchor.constraint(equalToConstant: 28),
+
+            itemsStack.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 14),
+            itemsStack.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
+            itemsStack.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
+            itemsStack.bottomAnchor.constraint(equalTo: containerView.safeAreaLayoutGuide.bottomAnchor, constant: -14)
+        ])
     }
 
-    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        tableView.deselectRow(at: indexPath, animated: true)
-        let item = items[indexPath.row]
+    @objc private func handleItemTap(_ sender: UIButton) {
+        let item = items[sender.tag]
         dismiss(animated: true) {
             item.handler?()
         }
+    }
+
+    @objc private func handleDismiss() {
+        dismiss(animated: true)
     }
 }
 
