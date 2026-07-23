@@ -8,6 +8,7 @@ final class TabGridViewController: UIViewController, UICollectionViewDataSource,
 
     var onSelectTab: ((Int) -> Void)?
     var onCloseTab: ((Int) -> Void)?
+    var onClearAllTabs: (() -> Void)?
     var onNewTab: (() -> Void)?
 
     init(tabs: [TabItem], activeIndex: Int) {
@@ -71,6 +72,12 @@ final class TabGridViewController: UIViewController, UICollectionViewDataSource,
             addButton.heightAnchor.constraint(equalToConstant: 48)
         ])
 
+        navigationItem.leftBarButtonItem = UIBarButtonItem(
+            image: UIImage(systemName: "trash"),
+            style: .plain,
+            target: self,
+            action: #selector(handleClearAllTabs)
+        )
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             title: "完成",
             style: .done,
@@ -137,6 +144,18 @@ final class TabGridViewController: UIViewController, UICollectionViewDataSource,
         }
     }
 
+    @objc private func handleClearAllTabs() {
+        guard !tabs.isEmpty else { return }
+        let alert = UIAlertController(title: "关闭所有标签页", message: "确定要关闭所有标签页吗？", preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        alert.addAction(UIAlertAction(title: "确定关闭", style: .destructive) { [weak self] _ in
+            self?.dismiss(animated: true) {
+                self?.onClearAllTabs?()
+            }
+        })
+        present(alert, animated: true)
+    }
+
     @objc private func handleNewTab() {
         dismiss(animated: true) { [weak self] in
             self?.onNewTab?()
@@ -185,6 +204,7 @@ final class TabGridCell: UICollectionViewCell {
             ),
             for: .normal
         )
+        closeButton.hitTestInsets = UIEdgeInsets(top: -12, left: -12, bottom: -12, right: -12)
         closeButton.addTarget(self, action: #selector(handleClose), for: .touchUpInside)
 
         headerView.addSubview(titleLabel)
