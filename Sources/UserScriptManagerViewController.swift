@@ -213,6 +213,7 @@ final class UserScriptRowCell: UITableViewCell {
     private let cardView = UIView()
     private let iconView = UIView()
     private let iconLabel = UILabel()
+    private let iconImageView = UIImageView()
     private let nameLabel = UILabel()
     private let matchLabel = UILabel()
     private let toggleSwitch = UISwitch()
@@ -243,7 +244,12 @@ final class UserScriptRowCell: UITableViewCell {
         iconLabel.textColor = .systemRed
         iconLabel.textAlignment = .center
 
+        iconImageView.translatesAutoresizingMaskIntoConstraints = false
+        iconImageView.contentMode = .scaleAspectFit
+        iconImageView.clipsToBounds = true
+
         iconView.addSubview(iconLabel)
+        iconView.addSubview(iconImageView)
 
         nameLabel.translatesAutoresizingMaskIntoConstraints = false
         nameLabel.font = .systemFont(ofSize: 15, weight: .bold)
@@ -283,6 +289,11 @@ final class UserScriptRowCell: UITableViewCell {
             iconLabel.centerXAnchor.constraint(equalTo: iconView.centerXAnchor),
             iconLabel.centerYAnchor.constraint(equalTo: iconView.centerYAnchor),
 
+            iconImageView.topAnchor.constraint(equalTo: iconView.topAnchor),
+            iconImageView.bottomAnchor.constraint(equalTo: iconView.bottomAnchor),
+            iconImageView.leadingAnchor.constraint(equalTo: iconView.leadingAnchor),
+            iconImageView.trailingAnchor.constraint(equalTo: iconView.trailingAnchor),
+
             labelStack.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 12),
             labelStack.trailingAnchor.constraint(equalTo: toggleSwitch.leadingAnchor, constant: -10),
             labelStack.centerYAnchor.constraint(equalTo: cardView.centerYAnchor),
@@ -299,11 +310,35 @@ final class UserScriptRowCell: UITableViewCell {
         matchLabel.text = "匹配: \(script.matchPattern)"
         toggleSwitch.isOn = script.isEnabled
 
+        iconImageView.image = nil
+        iconImageView.isHidden = true
+        iconLabel.isHidden = false
+
         let firstChar = String(script.name.prefix(1))
         iconLabel.text = firstChar.isEmpty ? "网" : firstChar
 
         let colors: [UIColor] = [.systemRed, .systemOrange, .systemBlue, .systemPurple, .systemTeal]
         iconLabel.textColor = colors[index % colors.count]
+
+        if let iconStr = script.iconURL, !iconStr.isEmpty {
+            if iconStr.hasPrefix("data:image"), let commaIdx = iconStr.firstIndex(of: ",") {
+                let base64Str = String(iconStr[iconStr.index(after: commaIdx)...])
+                if let data = Data(base64Encoded: base64Str, options: .ignoreUnknownCharacters), let img = UIImage(data: data) {
+                    iconImageView.image = img
+                    iconImageView.isHidden = false
+                    iconLabel.isHidden = true
+                }
+            } else if let url = URL(string: iconStr), url.scheme?.hasPrefix("http") == true {
+                URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
+                    guard let data = data, let img = UIImage(data: data) else { return }
+                    DispatchQueue.main.async {
+                        self?.iconImageView.image = img
+                        self?.iconImageView.isHidden = false
+                        self?.iconLabel.isHidden = true
+                    }
+                }.resume()
+            }
+        }
     }
 
     @objc private func handleSwitch() {
