@@ -598,22 +598,32 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
                 var opts = window.__gm_xhr_callbacks__[id];
                 if (!opts) return;
                 delete window.__gm_xhr_callbacks__[id];
-                if (opts.onload) {
-                    opts.onload({
-                        status: status,
-                        responseText: text,
-                        readyState: 4
-                    });
-                }
+                var res = {
+                    status: status,
+                    statusText: status === 200 ? 'OK' : '',
+                    responseText: text,
+                    response: text,
+                    readyState: 4,
+                    finalUrl: opts.url
+                };
+                if (opts.onload) { opts.onload(res); }
+                if (opts.onreadystatechange) { opts.onreadystatechange(res); }
             };
             window.__gm_handleXhrError = function(id, errorText) {
                 var opts = window.__gm_xhr_callbacks__[id];
                 if (!opts) return;
                 delete window.__gm_xhr_callbacks__[id];
-                if (opts.onerror) {
-                    opts.onerror({ status: 0, responseText: errorText });
-                }
+                var res = { status: 0, statusText: errorText, responseText: errorText, response: errorText, readyState: 4 };
+                if (opts.onerror) { opts.onerror(res); }
             };
+
+            window.GM = window.GM || {};
+            window.GM.xmlHttpRequest = window.GM_xmlhttpRequest;
+            window.GM.setValue = function(k, v) { return new Promise(function(resolve){ GM_setValue(k, v); resolve(); }); };
+            window.GM.getValue = function(k, d) { return new Promise(function(resolve){ resolve(GM_getValue(k, d)); }); };
+            window.GM.deleteValue = function(k) { return new Promise(function(resolve){ GM_deleteValue(k); resolve(); }); };
+            window.GM.addStyle = window.GM_addStyle;
+            window.GM.registerMenuCommand = function(c, f) { return Promise.resolve(GM_registerMenuCommand(c, f)); };
         }
         """
 
