@@ -39,11 +39,6 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         configuration.mediaTypesRequiringUserActionForPlayback = .all
         configuration.allowsPictureInPictureMediaPlayback = true
 
-        if #available(iOS 13.0, *) {
-            let isDesktop = UserAgentStore.shared.getSelectedId() == "default_mac"
-            configuration.defaultWebpagePreferences.preferredContentMode = isDesktop ? .desktop : .mobile
-        }
-
         let userContentController = WKUserContentController()
         configuration.userContentController = userContentController
 
@@ -412,16 +407,21 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
     func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction,
-        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        preferences: WKWebpagePreferences,
+        decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void
     ) {
         guard let targetURL = navigationAction.request.url else {
-            decisionHandler(.cancel)
+            decisionHandler(.cancel, preferences)
             return
         }
 
         navigationActionURL = targetURL
 
+        let isDesktopMode = UserAgentStore.shared.getSelectedId() == "default_mac"
+        preferences.preferredContentMode = isDesktopMode ? .desktop : .mobile
+
         let scheme = targetURL.scheme?.lowercased() ?? ""
+
         if ["http", "https"].contains(scheme),
            navigationAction.targetFrame != nil,
            targetURL != url {
@@ -429,23 +429,26 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         }
 
         if targetURL.path.hasSuffix(".user.js") || targetURL.absoluteString.hasSuffix(".user.js") {
-            decisionHandler(.cancel)
-            NotificationCenter.default.post(name: NSNotification.Name("InstallUserScriptNotification"), object: targetURL)
+            decisionHandler(.cancel, preferences)
+            NotificationCenter.default.post(
+                name: NSNotification.Name("InstallUserScriptNotification"),
+                object: targetURL
+            )
             return
         }
 
         if ["http", "https", "about", "data", "blob"].contains(scheme) {
             if navigationAction.targetFrame == nil {
-                decisionHandler(.cancel)
+                decisionHandler(.cancel, preferences)
                 delegate?.tabRequestNewTab(url: targetURL)
                 return
             }
 
-            decisionHandler(.allow)
+            decisionHandler(.allow, preferences)
             return
         }
 
-        decisionHandler(.cancel)
+        decisionHandler(.cancel, preferences)
 
         if scheme == "intent", let fallbackURL = fallbackURL(from: targetURL) {
             webView.load(URLRequest(url: fallbackURL))
