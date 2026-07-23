@@ -63,6 +63,16 @@ final class AdBlockManager {
         }
     }
 
+    func updateSubscription(id: String, name: String, urlString: String) {
+        var subs = loadSubscriptions()
+        if let idx = subs.firstIndex(where: { $0.id == id }) {
+            subs[idx].name = name
+            subs[idx].urlString = urlString
+            saveSubscriptions(subs)
+            recompileRules()
+        }
+    }
+
     func getCustomRules() -> String {
         return UserDefaults.standard.string(forKey: customRulesKey) ?? "##.ad-banner\n##.adsbygoogle\n||doubleclick.net^"
     }
@@ -334,6 +344,43 @@ final class AdBlockManagerViewController: UIViewController, UITableViewDataSourc
             }
             navigationController?.pushViewController(customVC, animated: true)
         }
+    }
+
+    func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        guard indexPath.section == 1, indexPath.row < subscriptions.count else { return nil }
+        let sub = subscriptions[indexPath.row]
+
+        let editAction = UIContextualAction(style: .normal, title: "编辑") { [weak self] _, _, completion in
+            self?.showEditSubscriptionAlert(sub)
+            completion(true)
+        }
+        editAction.backgroundColor = .systemBlue
+
+        return UISwipeActionsConfiguration(actions: [editAction])
+    }
+
+    private func showEditSubscriptionAlert(_ sub: AdBlockSubscription) {
+        let alert = UIAlertController(title: "编辑规则订阅", message: nil, preferredStyle: .alert)
+        alert.addTextField { tf in
+            tf.placeholder = "订阅名称"
+            tf.text = sub.name
+        }
+        alert.addTextField { tf in
+            tf.placeholder = "订阅 URL"
+            tf.text = sub.urlString
+        }
+
+        alert.addAction(UIAlertAction(title: "保存", style: .default) { [weak self] _ in
+            guard let name = alert.textFields?[0].text?.trimmingCharacters(in: .whitespaces), !name.isEmpty,
+                  let urlStr = alert.textFields?[1].text?.trimmingCharacters(in: .whitespaces), !urlStr.isEmpty else { return }
+
+            AdBlockManager.shared.updateSubscription(id: sub.id, name: name, urlString: urlStr)
+            self?.loadData()
+            self?.onRulesChanged?()
+        })
+
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        present(alert, animated: true)
     }
 
     private func showSubscriptionDetail(_ sub: AdBlockSubscription) {
