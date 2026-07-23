@@ -18,7 +18,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
 }
 
 final class TouchButton: UIButton {
-    private let hapticGenerator = UIImpactFeedbackGenerator(style: .light)
+    private let hapticGenerator = UIImpactFeedbackGenerator(style: .medium)
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -38,7 +38,7 @@ final class TouchButton: UIButton {
     @objc private func handleTouchDown() {
         hapticGenerator.impactOccurred()
         UIView.animate(withDuration: 0.08) {
-            self.transform = CGAffineTransform(scaleX: 0.88, y: 0.88)
+            self.transform = CGAffineTransform(scaleX: 0.90, y: 0.90)
         }
     }
 
@@ -72,6 +72,8 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     private let addressShadowView = UIView()
     private let addressContainer = UIView()
     private let siteSettingsButton = TouchButton(type: .system)
+    private let lockIconImageView = UIImageView()
+    private let searchIconImageView = UIImageView()
     private let addressField = UITextField()
     private let refreshButton = TouchButton(type: .system)
     private let clearButton = TouchButton(type: .system)
@@ -269,7 +271,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         addressShadowView.translatesAutoresizingMaskIntoConstraints = false
         addressShadowView.backgroundColor = .white
-        addressShadowView.layer.cornerRadius = 19
+        addressShadowView.layer.cornerRadius = 22
         addressShadowView.layer.shadowColor = UIColor.black.cgColor
         addressShadowView.layer.shadowOpacity = 0.05
         addressShadowView.layer.shadowRadius = 8
@@ -278,11 +280,11 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         addressContainer.translatesAutoresizingMaskIntoConstraints = false
         addressContainer.backgroundColor = .white
-        addressContainer.layer.cornerRadius = 19
+        addressContainer.layer.cornerRadius = 22
         addressContainer.clipsToBounds = true
 
         let longPressAddress = UILongPressGestureRecognizer(target: self, action: #selector(handleAddressLongPress(_:)))
-        longPressAddress.minimumPressDuration = 0.6
+        longPressAddress.minimumPressDuration = 0.4
         addressContainer.addGestureRecognizer(longPressAddress)
 
         siteSettingsButton.translatesAutoresizingMaskIntoConstraints = false
@@ -296,12 +298,22 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         )
         siteSettingsButton.addTarget(self, action: #selector(showSiteDomainSettings), for: .touchUpInside)
 
+        lockIconImageView.translatesAutoresizingMaskIntoConstraints = false
+        lockIconImageView.image = UIImage(systemName: "lock.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .regular))
+        lockIconImageView.tintColor = .secondaryLabel
+        lockIconImageView.contentMode = .scaleAspectFit
+
+        searchIconImageView.translatesAutoresizingMaskIntoConstraints = false
+        searchIconImageView.image = UIImage(systemName: "magnifyingglass", withConfiguration: UIImage.SymbolConfiguration(pointSize: 13, weight: .medium))
+        searchIconImageView.tintColor = .secondaryLabel
+        searchIconImageView.contentMode = .scaleAspectFit
+
         addressField.translatesAutoresizingMaskIntoConstraints = false
         addressField.delegate = self
         addressField.placeholder = "搜索或输入网址"
         addressField.font = .systemFont(ofSize: 14, weight: .regular)
         addressField.textColor = .label
-        addressField.textAlignment = .center
+        addressField.textAlignment = .left
         addressField.keyboardType = .webSearch
         addressField.returnKeyType = .go
         addressField.autocapitalizationType = .none
@@ -353,7 +365,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         configureToolbarButton(moreButton, imageName: "line.3.horizontal", action: #selector(showMoreMenu))
 
         let longPressMore = UILongPressGestureRecognizer(target: self, action: #selector(handleMoreButtonLongPress(_:)))
-        longPressMore.minimumPressDuration = 1.0
+        longPressMore.minimumPressDuration = 0.4
         moreButton.addGestureRecognizer(longPressMore)
 
         navigationStack.addArrangedSubview(backButton)
@@ -363,6 +375,8 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         navigationStack.addArrangedSubview(moreButton)
 
         addressContainer.addSubview(siteSettingsButton)
+        addressContainer.addSubview(lockIconImageView)
+        addressContainer.addSubview(searchIconImageView)
         addressContainer.addSubview(addressField)
         addressContainer.addSubview(refreshButton)
         addressContainer.addSubview(clearButton)
@@ -408,37 +422,47 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             addressContainer.topAnchor.constraint(equalTo: bottomPanel.topAnchor, constant: 6),
             addressContainer.leadingAnchor.constraint(equalTo: bottomPanel.leadingAnchor, constant: 16),
             addressContainer.trailingAnchor.constraint(equalTo: bottomPanel.trailingAnchor, constant: -16),
-            addressContainer.heightAnchor.constraint(equalToConstant: 40),
+            addressContainer.heightAnchor.constraint(equalToConstant: 44),
 
             addressShadowView.topAnchor.constraint(equalTo: addressContainer.topAnchor),
             addressShadowView.leadingAnchor.constraint(equalTo: addressContainer.leadingAnchor),
             addressShadowView.trailingAnchor.constraint(equalTo: addressContainer.trailingAnchor),
             addressShadowView.bottomAnchor.constraint(equalTo: addressContainer.bottomAnchor),
 
-            siteSettingsButton.leadingAnchor.constraint(equalTo: addressContainer.leadingAnchor, constant: 8),
+            siteSettingsButton.leadingAnchor.constraint(equalTo: addressContainer.leadingAnchor, constant: 12),
             siteSettingsButton.centerYAnchor.constraint(equalTo: addressContainer.centerYAnchor),
             siteSettingsButton.widthAnchor.constraint(equalToConstant: 24),
             siteSettingsButton.heightAnchor.constraint(equalToConstant: 24),
+
+            lockIconImageView.leadingAnchor.constraint(equalTo: siteSettingsButton.trailingAnchor, constant: 12),
+            lockIconImageView.centerYAnchor.constraint(equalTo: addressContainer.centerYAnchor),
+            lockIconImageView.widthAnchor.constraint(equalToConstant: 14),
+            lockIconImageView.heightAnchor.constraint(equalToConstant: 14),
+
+            searchIconImageView.leadingAnchor.constraint(equalTo: lockIconImageView.trailingAnchor, constant: 4),
+            searchIconImageView.centerYAnchor.constraint(equalTo: addressContainer.centerYAnchor),
+            searchIconImageView.widthAnchor.constraint(equalToConstant: 14),
+            searchIconImageView.heightAnchor.constraint(equalToConstant: 14),
+
+            addressField.leadingAnchor.constraint(equalTo: searchIconImageView.trailingAnchor, constant: 6),
+            addressField.trailingAnchor.constraint(equalTo: refreshButton.leadingAnchor, constant: -6),
+            addressField.topAnchor.constraint(equalTo: addressContainer.topAnchor),
+            addressField.bottomAnchor.constraint(equalTo: addressContainer.bottomAnchor),
 
             progressView.leadingAnchor.constraint(equalTo: addressContainer.leadingAnchor),
             progressView.trailingAnchor.constraint(equalTo: addressContainer.trailingAnchor),
             progressView.bottomAnchor.constraint(equalTo: addressContainer.bottomAnchor),
             progressView.heightAnchor.constraint(equalToConstant: 2.5),
 
-            refreshButton.trailingAnchor.constraint(equalTo: addressContainer.trailingAnchor, constant: -8),
+            refreshButton.trailingAnchor.constraint(equalTo: addressContainer.trailingAnchor, constant: -12),
             refreshButton.centerYAnchor.constraint(equalTo: addressContainer.centerYAnchor),
             refreshButton.widthAnchor.constraint(equalToConstant: 24),
             refreshButton.heightAnchor.constraint(equalToConstant: 24),
 
-            clearButton.trailingAnchor.constraint(equalTo: addressContainer.trailingAnchor, constant: -8),
+            clearButton.trailingAnchor.constraint(equalTo: addressContainer.trailingAnchor, constant: -12),
             clearButton.centerYAnchor.constraint(equalTo: addressContainer.centerYAnchor),
             clearButton.widthAnchor.constraint(equalToConstant: 24),
             clearButton.heightAnchor.constraint(equalToConstant: 24),
-
-            addressField.leadingAnchor.constraint(equalTo: siteSettingsButton.trailingAnchor, constant: 6),
-            addressField.trailingAnchor.constraint(equalTo: refreshButton.leadingAnchor, constant: -6),
-            addressField.topAnchor.constraint(equalTo: addressContainer.topAnchor),
-            addressField.bottomAnchor.constraint(equalTo: addressContainer.bottomAnchor),
 
             navigationStack.topAnchor.constraint(equalTo: addressContainer.bottomAnchor, constant: 8),
             navigationStack.leadingAnchor.constraint(equalTo: bottomPanel.leadingAnchor, constant: 16),
@@ -450,6 +474,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
     @objc private func handleMoreButtonLongPress(_ gesture: UILongPressGestureRecognizer) {
         guard gesture.state == .began else { return }
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         showCleanDataMenu()
     }
 
@@ -459,8 +484,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         guard !urlText.isEmpty else { return }
 
         UIPasteboard.general.string = urlText
-        let feedback = UIImpactFeedbackGenerator(style: .medium)
-        feedback.impactOccurred()
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         showToastNotice("已复制当前网址")
     }
 
@@ -534,7 +558,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
     private func configureFullscreenExitGesture() {
         let gesture = UILongPressGestureRecognizer(target: self, action: #selector(handleFullscreenExitGesture(_:)))
-        gesture.minimumPressDuration = 1.5
+        gesture.minimumPressDuration = 0.5
         gesture.numberOfTouchesRequired = 2
         gesture.cancelsTouchesInView = false
         view.addGestureRecognizer(gesture)
@@ -797,7 +821,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             textField.text = url.absoluteString
         }
 
-        textField.textAlignment = .left
         navigationStack.isHidden = true
         updateAddressEditingAppearance()
 
@@ -813,7 +836,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             textField.text = ""
         }
 
-        textField.textAlignment = .center
         navigationStack.isHidden = false
         updateAddressEditingAppearance()
     }
@@ -910,7 +932,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         guard isFullscreen, gesture.state == .began else {
             return
         }
-
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         setFullscreen(false)
     }
 
