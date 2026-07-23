@@ -7,6 +7,7 @@ final class CustomBottomSheetViewController: UIViewController {
 
     private let dimmingView = UIView()
     private let containerView = UIView()
+    private var containerBottomConstraint: NSLayoutConstraint?
 
     init(title: String, items: [CustomBottomSheetItem], layout: CustomBottomSheetLayout = .list) {
         self.titleString = title
@@ -24,11 +25,17 @@ final class CustomBottomSheetViewController: UIViewController {
         setupViews()
     }
 
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        animateIn()
+    }
+
     private func setupViews() {
         view.backgroundColor = .clear
 
         dimmingView.translatesAutoresizingMaskIntoConstraints = false
         dimmingView.backgroundColor = UIColor.black.withAlphaComponent(0.3)
+        dimmingView.alpha = 0
         let tapDimming = UITapGestureRecognizer(target: self, action: #selector(handleDismiss))
         dimmingView.addGestureRecognizer(tapDimming)
 
@@ -72,6 +79,8 @@ final class CustomBottomSheetViewController: UIViewController {
         view.addSubview(dimmingView)
         view.addSubview(containerView)
 
+        containerBottomConstraint = containerView.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: 400)
+
         NSLayoutConstraint.activate([
             dimmingView.topAnchor.constraint(equalTo: view.topAnchor),
             dimmingView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -80,7 +89,7 @@ final class CustomBottomSheetViewController: UIViewController {
 
             containerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             containerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            containerView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            containerBottomConstraint!,
 
             handleBar.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 8),
             handleBar.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
@@ -100,6 +109,14 @@ final class CustomBottomSheetViewController: UIViewController {
             contentContainer.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
             contentContainer.bottomAnchor.constraint(equalTo: containerView.safeAreaLayoutGuide.bottomAnchor, constant: -12)
         ])
+    }
+
+    private func animateIn() {
+        containerBottomConstraint?.constant = 0
+        UIView.animate(withDuration: 0.26, delay: 0, options: [.curveEaseOut]) {
+            self.dimmingView.alpha = 1
+            self.view.layoutIfNeeded()
+        }
     }
 
     private func setupGridLayout(in container: UIView) {
@@ -200,12 +217,22 @@ final class CustomBottomSheetViewController: UIViewController {
 
     @objc private func handleItemTap(_ sender: UIButton) {
         let item = items[sender.tag]
-        dismiss(animated: true) {
+        handleDismiss {
             item.handler?()
         }
     }
 
     @objc private func handleDismiss() {
-        dismiss(animated: true)
+        handleDismiss(completion: nil)
+    }
+
+    private func handleDismiss(completion: (() -> Void)?) {
+        containerBottomConstraint?.constant = 400
+        UIView.animate(withDuration: 0.22, delay: 0, options: [.curveEaseIn], animations: {
+            self.dimmingView.alpha = 0
+            self.view.layoutIfNeeded()
+        }) { _ in
+            self.dismiss(animated: false, completion: completion)
+        }
     }
 }
