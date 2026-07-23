@@ -422,6 +422,7 @@ protocol TabItemDelegate: AnyObject {
     func tabDidFail(_ tab: TabItem, error: Error)
     func tabRequestNewTab(url: URL)
     func tabProcessTerminated(_ tab: TabItem)
+    func tabRequestGoBack(_ tab: TabItem)
 }
 
 final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
@@ -432,6 +433,11 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
     var isLoading = false
     var snapshot: UIImage?
     var registeredCommands: [RegisteredMenuCommand] = []
+
+    var sourceTabID: UUID?
+    var failedURL: URL?
+    var isDisplayingFailurePage = false
+    var previousURL: URL?
 
     private var hasInjectedScriptsForCurrentPage = false
     private var navigationActionURL: URL?
@@ -495,7 +501,9 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let body = message.body as? [String: Any], let action = body["action"] as? String else { return }
 
-        if action == "registerMenuCommand", let cmdId = body["id"] as? Int, let caption = body["caption"] as? String {
+        if action == "goBackAction" {
+            delegate?.tabRequestGoBack(self)
+        } else if action == "registerMenuCommand", let cmdId = body["id"] as? Int, let caption = body["caption"] as? String {
             let scriptId = (body["scriptId"] as? String) ?? ""
             registeredCommands.removeAll { $0.cmdId == cmdId || ($0.scriptId == scriptId && $0.caption == caption) }
             registeredCommands.append(RegisteredMenuCommand(scriptId: scriptId, cmdId: cmdId, caption: caption))
@@ -696,49 +704,53 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         }
     }
 
-    func loadErrorPage(for failedURL: URL?, error: Error) {
+    func loadErrorPage(for targetURL: URL?, error: Error) {
         let nsError = error as NSError
         guard nsError.domain != "WebKitErrorDomain" && nsError.code != NSURLErrorCancelled && nsError.code != 102 else { return }
 
+        isDisplayingFailurePage = true
+        failedURL = targetURL ?? webView.url
+        url = failedURL
+        title = "无法连接服务器"
+
         var titleStr = "无法连接服务器"
-        var reasonStr = nsError.localizedDescription
+        var reasonStr = "服务器拒绝连接或已被网络策略/代理拦截。"
         if nsError.code == NSURLErrorNotConnectedToInternet {
             titleStr = "未连接网络"
-            reasonStr = "请检查您的网络连接。"
+            reasonStr = "请检查网络连接。"
         } else if nsError.code == NSURLErrorCannotFindHost {
             titleStr = "找不到服务器"
             reasonStr = "域名解析失败。"
-        } else if nsError.code == NSURLErrorCannotConnectToHost {
-            titleStr = "无法连接服务器"
-            reasonStr = "服务器拒绝连接或已被网络策略/代理拦截。"
         } else if nsError.code == NSURLErrorTimedOut {
             titleStr = "连接超时"
-            reasonStr = "服务器响应超时。"
+            reasonStr = "网络响应超时。"
         }
 
         let urlStr = failedURL?.absoluteString ?? ""
-        url = failedURL ?? url
-        title = titleStr
-
         let html = """
         <!DOCTYPE html>
         <html>
         <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
         <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background-color: #ffffff; color: #000000; margin: 0; padding: 60px 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 60vh; text-align: center; }
-            h1 { font-size: 22px; font-weight: 600; margin: 0 0 10px 0; }
-            p { font-size: 14px; color: #8e8e93; margin: 0 0 20px 0; max-width: 320px; line-height: 1.4; }
-            .url { font-size: 13px; color: #c7c7cc; word-break: break-all; margin-bottom: 28px; max-width: 300px; }
-            .btn { background-color: #007aff; color: #ffffff; border: none; padding: 12px 36px; font-size: 16px; font-weight: 500; border-radius: 22px; cursor: pointer; display: inline-block; -webkit-tap-highlight-color: transparent; }
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f8f9fa; color: #212529; margin: 0; padding: 60px 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 60vh; text-align: center; }
+            h1 { font-size: 22px; font-weight: 600; margin: 0 0 12px 0; color: #1a1a1a; }
+            p { font-size: 14px; color: #6c757d; margin: 0 0 16px 0; max-width: 320px; line-height: 1.5; }
+            .url-box { font-size: 13px; color: #adb5bd; word-break: break-all; margin-bottom: 32px; max-width: 300px; }
+            .btn-group { display: flex; gap: 12px; }
+            .btn { background-color: #ffffff; color: #495057; border: 1px solid #ced4da; padding: 10px 24px; font-size: 14px; font-weight: 500; border-radius: 8px; cursor: pointer; display: inline-block; -webkit-tap-highlight-color: transparent; }
+            .btn-primary { background-color: #007aff; color: #ffffff; border: none; }
             .btn:active { opacity: 0.7; }
         </style>
         </head>
         <body>
             <h1>\(titleStr)</h1>
             <p>\(reasonStr)</p>
-            <div class="url">\(urlStr)</div>
-            <button class="btn" onclick="location.reload()">重新加载</button>
+            <div class="url-box">\(urlStr)</div>
+            <div class="btn-group">
+                <button class="btn" onclick="window.webkit.messageHandlers.GM.postMessage({action: 'goBackAction'})">返回上一页</button>
+                <button class="btn btn-primary" onclick="location.reload()">重新加载</button>
+            </div>
         </body>
         </html>
         """
@@ -754,13 +766,19 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         isLoading = true
+        isDisplayingFailurePage = false
         hasInjectedScriptsForCurrentPage = false
         registeredCommands.removeAll()
         delegate?.tabDidUpdate(self)
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        url = webView.url
+        if let currentURL = webView.url, !currentURL.absoluteString.contains("about:blank") {
+            if previousURL != currentURL {
+                previousURL = url
+            }
+            url = currentURL
+        }
         title = webView.title ?? url?.host ?? "新标签页"
         if !hasInjectedScriptsForCurrentPage {
             hasInjectedScriptsForCurrentPage = true
@@ -771,8 +789,10 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         isLoading = false
-        url = webView.url
-        title = webView.title ?? url?.host ?? "新标签页"
+        if !isDisplayingFailurePage {
+            url = webView.url
+            title = webView.title ?? url?.host ?? "新标签页"
+        }
         if !hasInjectedScriptsForCurrentPage {
             hasInjectedScriptsForCurrentPage = true
             injectAndRunUserScripts()
