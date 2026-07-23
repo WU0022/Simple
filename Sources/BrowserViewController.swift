@@ -108,6 +108,15 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         }
     }
 
+    override func didReceiveMemoryWarning() {
+        super.didReceiveMemoryWarning()
+        for (idx, tab) in tabs.enumerated() {
+            if idx != activeTabIndex {
+                tab.snapshot = nil
+            }
+        }
+    }
+
     deinit {
         NotificationCenter.default.removeObserver(self)
         progressObservation?.invalidate()
@@ -459,13 +468,9 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     }
 
     private func closeTab(at index: Int) {
-        guard tabs.indices.contains(index) else {
-            return
-        }
-
+        guard tabs.indices.contains(index) else { return }
         let tab = tabs[index]
-        tab.webView.stopLoading()
-        tab.webView.removeFromSuperview()
+        tab.destroy()
         tabs.remove(at: index)
 
         if tabs.isEmpty {
@@ -540,29 +545,23 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
     private func destinationURL(from input: String) -> URL? {
         let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !value.isEmpty else {
-            return nil
-        }
+        guard !value.isEmpty else { return nil }
 
         SearchHistoryStore.shared.addHistory(value)
 
-        var urlString = value
-        if !urlString.hasPrefix("http://") && !urlString.hasPrefix("https://") {
-            if urlString.contains(".") && !urlString.contains(" ") {
-                urlString = "https://" + urlString
-            } else {
-                let encoded = urlString.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? urlString
-                return URL(string: "https://www.google.com/search?q=\(encoded)")
-            }
+        if value.hasPrefix("http://") || value.hasPrefix("https://") {
+            return URL(string: value)
         }
 
-        if let encodedURLString = urlString.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-           let url = URL(string: encodedURLString) {
-            return url
+        if value.contains(".") && !value.contains(" ") {
+            return URL(string: "https://" + value)
         }
 
-        return URL(string: urlString)
+        if let encodedQuery = value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            return URL(string: "https://www.google.com/search?q=\(encodedQuery)")
+        }
+
+        return nil
     }
 
     private func setFullscreen(_ enabled: Bool) {
@@ -591,22 +590,30 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
     private func showLoadError(_ error: Error) {
         let nsError = error as NSError
+        guard nsError.domain != "WebKitErrorDomain" && nsError.code != NSURLErrorCancelled && nsError.code != 102 else { return }
 
-        guard nsError.domain != "WebKitErrorDomain" && nsError.code != NSURLErrorCancelled && nsError.code != 102 else {
-            return
+        var title = "无法访问页面"
+        var reason = nsError.localizedDescription
+
+        if nsError.code == NSURLErrorNotConnectedToInternet {
+            title = "网络连接未建立"
+            reason = "请检查您的网络设置、Wi-Fi 或蜂窝移动数据。"
+        } else if nsError.code == NSURLErrorCannotFindHost {
+            title = "找不到服务器"
+            reason = "DNS 解析失败，请检查输入的网址或代理配置。"
+        } else if nsError.code == NSURLErrorCannotConnectToHost {
+            title = "无法连接服务器"
+            reason = "目标服务器拒绝连接或无法响应。"
+        } else if nsError.code == NSURLErrorTimedOut {
+            title = "连接超时"
+            reason = "网络响应过慢，请求已被中断。"
         }
 
-        let alert = UIAlertController(
-            title: "无法访问页面",
-            message: nsError.localizedDescription,
-            preferredStyle: .alert
-        )
-
-        alert.addAction(UIAlertAction(title: "重试", style: .default) { [weak self] _ in
+        let alert = UIAlertController(title: title, message: reason, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "重新加载", style: .default) { [weak self] _ in
             self?.activeTab.webView.reload()
         })
         alert.addAction(UIAlertAction(title: "取消", style: .cancel))
-
         present(alert, animated: true)
     }
 
@@ -624,6 +631,16 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
     func tabRequestNewTab(url: URL) {
         createNewTab(loadURL: url)
+    }
+
+    func tabProcessTerminated(_ tab: TabItem) {
+        guard !tabs.isEmpty, tab.id == activeTab.id else { return }
+        let alert = UIAlertController(title: "页面被释放", message: "系统内存压力过大导致该页面已被释放，是否重新加载？", preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "恢复页面", style: .default) { [weak self] _ in
+            self?.activeTab.webView.reload()
+        })
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        present(alert, animated: true)
     }
 
     func tabDidUpdate(_ tab: TabItem) {
@@ -857,85 +874,114 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             UserScriptStore.shared.isScriptMatching(script: $0, urlString: currentUrlStr)
         }
 
-        var items: [MenuSheetItem] = []
+        var items: [CustomBottomSheetItem] = []
 
         if matchingScripts.isEmpty {
-            items.append(MenuSheetItem(title: "当前页面未匹配到已启用的脚本", style: .default, handler: nil))
+            items.append(CustomBottomSheetItem(
+                iconName: "info.circle",
+                title: "当前页面未匹配到已启用的脚本",
+                subtitle: "可以在 GreasyFork 上查找可用脚本",
+                handler: nil
+            ))
         } else {
             for script in matchingScripts {
-                let statusIcon = script.isEnabled ? "🟢" : "⚪"
-                items.append(MenuSheetItem(title: "\(statusIcon)  \(script.name)", style: .default, handler: { [weak self] in
-                    self?.showScriptSubMenu(for: script)
-                }))
+                let statusIcon = script.isEnabled ? "checkmark.circle.fill" : "circle"
+                items.append(CustomBottomSheetItem(
+                    iconName: statusIcon,
+                    title: script.name,
+                    subtitle: script.isEnabled ? "已启用的油猴脚本" : "已禁用",
+                    handler: { [weak self] in
+                        self?.showScriptSubMenu(for: script)
+                    }
+                ))
             }
         }
 
-        items.append(MenuSheetItem(title: "搜索适合当前网站的脚本", style: .default, handler: { [weak self] in
-            let searchUrlStr = "https://greasyfork.org/zh-CN/scripts?q=\(currentHost)"
-            if let searchUrl = URL(string: searchUrlStr) {
-                self?.load(url: searchUrl)
+        items.append(CustomBottomSheetItem(
+            iconName: "magnifyingglass",
+            title: "搜索适合当前网站的脚本",
+            subtitle: "打开 GreasyFork 搜索符合主机的扩展",
+            handler: { [weak self] in
+                let searchUrlStr = "https://greasyfork.org/zh-CN/scripts?q=\(currentHost)"
+                if let searchUrl = URL(string: searchUrlStr) {
+                    self?.load(url: searchUrl)
+                }
             }
-        }))
+        ))
 
-        items.append(MenuSheetItem(title: "用户脚本设置", style: .default, handler: { [weak self] in
-            self?.showPluginManager()
-        }))
-
-        let sheet = MenuSheetViewController(title: "正在运行的脚本", items: items)
-        let nav = UINavigationController(rootViewController: sheet)
-        if #available(iOS 15.0, *) {
-            if let presentation = nav.sheetPresentationController {
-                presentation.detents = [.medium(), .large()]
+        items.append(CustomBottomSheetItem(
+            iconName: "gearshape",
+            title: "用户脚本管理",
+            subtitle: "查看与配置全局油猴脚本列表",
+            handler: { [weak self] in
+                self?.showPluginManager()
             }
-        }
-        present(nav, animated: true)
+        ))
+
+        let panel = CustomBottomSheetViewController(title: "正在运行的脚本", subtitle: currentHost, items: items)
+        present(panel, animated: true)
     }
 
     private func showScriptSubMenu(for script: UserScript) {
-        var items: [MenuSheetItem] = []
+        var items: [CustomBottomSheetItem] = []
 
         let scriptCmds = activeTab.registeredCommands.filter { $0.scriptId == script.id }
         for cmd in scriptCmds {
-            items.append(MenuSheetItem(title: "⚙️  \(cmd.caption)", style: .default, handler: { [weak self] in
-                self?.activeTab.webView.evaluateJavaScript("window.__gm_invokeMenuCommand(\(cmd.cmdId))", completionHandler: nil)
-            }))
+            items.append(CustomBottomSheetItem(
+                iconName: "gear",
+                title: cmd.caption,
+                subtitle: "脚本触发菜单指令",
+                handler: { [weak self] in
+                    self?.activeTab.webView.evaluateJavaScript("window.__gm_invokeMenuCommand(\(cmd.cmdId))", completionHandler: nil)
+                }
+            ))
         }
 
-        items.append(MenuSheetItem(title: script.isEnabled ? "⏸ 禁用该脚本" : "▶️ 启用该脚本", style: .default, handler: { [weak self] in
-            var scripts = UserScriptStore.shared.loadScripts()
-            if let idx = scripts.firstIndex(where: { $0.id == script.id }) {
-                scripts[idx].isEnabled = !script.isEnabled
-                UserScriptStore.shared.saveScripts(scripts)
-                self?.activeTab.reloadUserScripts()
-            }
-        }))
-
-        items.append(MenuSheetItem(title: "🧹 清除该脚本缓存数据", style: .default, handler: {
-            ScriptDataStore.shared.clearDataForScript(scriptId: script.id)
-        }))
-
-        items.append(MenuSheetItem(title: "📝 编辑脚本代码", style: .default, handler: { [weak self] in
-            let editor = UserScriptEditorViewController(script: script)
-            editor.onSave = { updatedScript in
+        items.append(CustomBottomSheetItem(
+            iconName: script.isEnabled ? "pause.circle" : "play.circle",
+            title: script.isEnabled ? "禁用该脚本" : "启用该脚本",
+            subtitle: "针对所有域名生效的开关状态",
+            handler: { [weak self] in
                 var scripts = UserScriptStore.shared.loadScripts()
-                if let idx = scripts.firstIndex(where: { $0.id == updatedScript.id }) {
-                    scripts[idx] = updatedScript
+                if let idx = scripts.firstIndex(where: { $0.id == script.id }) {
+                    scripts[idx].isEnabled = !script.isEnabled
                     UserScriptStore.shared.saveScripts(scripts)
                     self?.activeTab.reloadUserScripts()
                 }
             }
-            let nav = UINavigationController(rootViewController: editor)
-            self?.present(nav, animated: true)
-        }))
+        ))
 
-        let sheet = MenuSheetViewController(title: script.name, items: items)
-        let nav = UINavigationController(rootViewController: sheet)
-        if #available(iOS 15.0, *) {
-            if let presentation = nav.sheetPresentationController {
-                presentation.detents = [.medium(), .large()]
+        items.append(CustomBottomSheetItem(
+            iconName: "trash",
+            title: "清除该脚本缓存数据",
+            subtitle: "重置该脚本在沙箱中保存的数据",
+            isDestructive: true,
+            handler: {
+                ScriptDataStore.shared.clearDataForScript(scriptId: script.id)
             }
-        }
-        present(nav, animated: true)
+        ))
+
+        items.append(CustomBottomSheetItem(
+            iconName: "square.and.pencil",
+            title: "编辑脚本代码",
+            subtitle: "自定义源代码及匹配元规则",
+            handler: { [weak self] in
+                let editor = UserScriptEditorViewController(script: script)
+                editor.onSave = { updatedScript in
+                    var scripts = UserScriptStore.shared.loadScripts()
+                    if let idx = scripts.firstIndex(where: { $0.id == updatedScript.id }) {
+                        scripts[idx] = updatedScript
+                        UserScriptStore.shared.saveScripts(scripts)
+                        self?.activeTab.reloadUserScripts()
+                    }
+                }
+                let nav = UINavigationController(rootViewController: editor)
+                self?.present(nav, animated: true)
+            }
+        ))
+
+        let panel = CustomBottomSheetViewController(title: script.name, subtitle: "脚本规则控制", items: items)
+        present(panel, animated: true)
     }
 
     @objc private func showPluginManager() {
@@ -983,11 +1029,12 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     @objc private func showMoreMenu() {
         dismissKeyboard()
 
-        var items: [MenuSheetItem] = []
+        var items: [CustomBottomSheetItem] = []
 
-        items.append(MenuSheetItem(
+        items.append(CustomBottomSheetItem(
+            iconName: isFullscreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
             title: isFullscreen ? "退出全屏浏览" : "全屏浏览",
-            style: .default,
+            subtitle: "切换导航与工具栏显示状态",
             handler: { [weak self] in
                 guard let self = self else { return }
                 self.setFullscreen(!self.isFullscreen)
@@ -995,27 +1042,30 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         ))
 
         let isEyeOn = EyeProtectionManager.shared.isEnabled
-        items.append(MenuSheetItem(
+        items.append(CustomBottomSheetItem(
+            iconName: isEyeOn ? "eye.slash.fill" : "eye.fill",
             title: isEyeOn ? "关闭护眼模式" : "开启护眼模式",
-            style: .default,
+            subtitle: "降低屏幕高亮遮罩对眼睛的刺激",
             handler: { [weak self] in
                 EyeProtectionManager.shared.toggle(in: self?.view.window)
             }
         ))
 
         let currentUAItem = UserAgentStore.shared.getSelectedItem()
-        items.append(MenuSheetItem(
+        items.append(CustomBottomSheetItem(
+            iconName: "network",
             title: "浏览器标识: \(currentUAItem.name)",
-            style: .default,
+            subtitle: "修改网页端识别的 User-Agent",
             handler: { [weak self] in
                 self?.showUserAgentManager()
             }
         ))
 
         let isDesktop = currentUAItem.id == "default_mac"
-        items.append(MenuSheetItem(
+        items.append(CustomBottomSheetItem(
+            iconName: isDesktop ? "iphone" : "desktopcomputer",
             title: isDesktop ? "切换为移动版网页" : "切换为电脑版网页",
-            style: .default,
+            subtitle: "修改请求头并重载当前标签",
             handler: { [weak self] in
                 let targetId = isDesktop ? "default_safari" : "default_mac"
                 UserAgentStore.shared.setSelectedId(targetId)
@@ -1025,22 +1075,18 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             }
         ))
 
-        items.append(MenuSheetItem(
-            title: "清除数据",
-            style: .default,
+        items.append(CustomBottomSheetItem(
+            iconName: "trash",
+            title: "清除数据与管理网站",
+            subtitle: "清理临时缓存文件或保护的重要本地数据",
+            isDestructive: true,
             handler: { [weak self] in
                 self?.showCleanDataMenu()
             }
         ))
 
-        let sheet = MenuSheetViewController(title: nil, items: items)
-        let nav = UINavigationController(rootViewController: sheet)
-        if #available(iOS 15.0, *) {
-            if let presentation = nav.sheetPresentationController {
-                presentation.detents = [.medium()]
-            }
-        }
-        present(nav, animated: true)
+        let panel = CustomBottomSheetViewController(title: "浏览器工具", subtitle: nil, items: items)
+        present(panel, animated: true)
     }
 
     private func showUserAgentManager() {
@@ -1068,23 +1114,19 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     }
 
     private func performCleanData(options: Set<CleanOption>) {
+        let group = DispatchGroup()
+
         if options.contains(.cache) {
-            let cacheTypes: Set<String> = [
-                WKWebsiteDataTypeDiskCache,
-                WKWebsiteDataTypeMemoryCache,
-                WKWebsiteDataTypeOfflineWebApplicationCache
-            ]
-            WKWebsiteDataStore.default().removeData(ofTypes: cacheTypes, modifiedSince: .distantPast) {}
+            group.enter()
+            WebsiteCleaner.shared.cleanCacheOnly {
+                group.leave()
+            }
         }
 
-        if options.contains(.cookies) {
-            let store = WKWebsiteDataStore.default().httpCookieStore
-            store.getAllCookies { cookies in
-                for cookie in cookies {
-                    if !CookieLockStore.shared.isLocked(domain: cookie.domain) {
-                        store.delete(cookie)
-                    }
-                }
+        if options.contains(.loginAndData) {
+            group.enter()
+            WebsiteCleaner.shared.cleanUnprotectedLoginAndData {
+                group.leave()
             }
         }
 
@@ -1096,7 +1138,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             ScriptDataStore.shared.clearAllScriptData()
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+        group.notify(queue: .main) { [weak self] in
             self?.showToastNotice("数据清理完成")
             self?.activeTab.webView.reload()
         }
