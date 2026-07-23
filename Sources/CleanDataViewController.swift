@@ -51,10 +51,7 @@ final class CleanDataSelectionViewController: UIViewController, UITableViewDataS
     }
 
     @objc private func requestCleanConfirmation() {
-        guard !selectedOptions.isEmpty else {
-            dismiss(animated: true)
-            return
-        }
+        guard !selectedOptions.isEmpty else { return }
 
         var message = "确定要执行清理操作吗？"
         if selectedOptions.contains(.loginAndData) {
@@ -66,8 +63,11 @@ final class CleanDataSelectionViewController: UIViewController, UITableViewDataS
         alert.addAction(UIAlertAction(title: "确定清理", style: .default) { [weak self] _ in
             guard let self = self else { return }
             let opts = self.selectedOptions
-            self.dismiss(animated: true) {
-                self.onConfirmClean?(opts)
+            self.onConfirmClean?(opts)
+            let successAlert = UIAlertController(title: nil, message: "清理完成", preferredStyle: .alert)
+            self.present(successAlert, animated: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                successAlert.dismiss(animated: true)
             }
         })
         present(alert, animated: true)
