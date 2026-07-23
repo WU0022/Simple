@@ -36,13 +36,13 @@ enum CustomBottomSheetLayout {
 
 enum SearchEngine: String, CaseIterable, Codable {
     case google = "google"
-    case bingInt = "bing_int"
+    case bing = "bing"
     case yandex = "yandex"
 
     var name: String {
         switch self {
         case .google: return "Google"
-        case .bingInt: return "Bing 国际版"
+        case .bing: return "Bing"
         case .yandex: return "Yandex"
         }
     }
@@ -52,8 +52,8 @@ enum SearchEngine: String, CaseIterable, Codable {
         switch self {
         case .google:
             return URL(string: "https://www.google.com/search?q=\(encoded)")
-        case .bingInt:
-            return URL(string: "https://www.bing.com/search?q=\(encoded)&setmkt=en-US&setlang=en-US")
+        case .bing:
+            return URL(string: "https://www.bing.com/search?q=\(encoded)")
         case .yandex:
             return URL(string: "https://yandex.com/search/?text=\(encoded)")
         }
