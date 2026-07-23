@@ -695,9 +695,57 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         }
     }
 
+    func loadErrorPage(for failedURL: URL?, error: Error) {
+        let nsError = error as NSError
+        guard nsError.domain != "WebKitErrorDomain" && nsError.code != NSURLErrorCancelled && nsError.code != 102 else { return }
+
+        var titleStr = "无法访问此页面"
+        var reasonStr = nsError.localizedDescription
+        if nsError.code == NSURLErrorNotConnectedToInternet {
+            titleStr = "未连接到互联网"
+            reasonStr = "请检查您的网络连接、Wi-Fi 或移动蜂窝数据。"
+        } else if nsError.code == NSURLErrorCannotFindHost {
+            titleStr = "找不到服务器"
+            reasonStr = "域名 DNS 解析失败，请检查网址或网络配置。"
+        } else if nsError.code == NSURLErrorCannotConnectToHost {
+            titleStr = "无法连接服务器"
+            reasonStr = "服务器拒绝连接或已被网络策略/代理拦截。"
+        } else if nsError.code == NSURLErrorTimedOut {
+            titleStr = "连接超时"
+            reasonStr = "服务器响应时间过长，请求已被终止。"
+        }
+
+        let urlStr = failedURL?.absoluteString ?? ""
+        let html = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Roboto, Helvetica, Arial, sans-serif; background-color: #f2f2f7; color: #1c1c1e; margin: 0; padding: 40px 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 70vh; text-align: center; }
+            .icon { font-size: 54px; margin-bottom: 16px; }
+            h1 { font-size: 20px; font-weight: 600; margin: 0 0 8px 0; }
+            p { font-size: 14px; color: #8e8e93; margin: 0 0 24px 0; max-width: 320px; line-height: 1.4; }
+            .url { font-size: 12px; color: #aeaeb2; word-break: break-all; margin-bottom: 24px; max-width: 300px; }
+            .btn { background-color: #007aff; color: white; border: none; padding: 12px 32px; font-size: 15px; font-weight: 500; border-radius: 20px; cursor: pointer; text-decoration: none; display: inline-block; -webkit-tap-highlight-color: transparent; }
+            .btn:active { opacity: 0.8; }
+        </style>
+        </head>
+        <body>
+            <div class="icon">🌐</div>
+            <h1>\(titleStr)</h1>
+            <p>\(reasonStr)</p>
+            <div class="url">\(urlStr)</div>
+            <button class="btn" onclick="location.reload()">重新加载</button>
+        </body>
+        </html>
+        """
+        webView.loadHTMLString(html, baseURL: failedURL)
+    }
+
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if navigationAction.targetFrame == nil {
-            webView.load(navigationAction.request)
+        if let targetURL = navigationAction.request.url {
+            delegate?.tabRequestNewTab(url: targetURL)
         }
         return nil
     }
@@ -742,8 +790,11 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         withError error: Error
     ) {
         isLoading = false
+        loadErrorPage(for: webView.url ?? navigationActionURL, error: error)
         delegate?.tabDidFail(self, error: error)
     }
+
+    private var navigationActionURL: URL?
 
     func webView(
         _ webView: WKWebView,
@@ -751,6 +802,7 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         withError error: Error
     ) {
         isLoading = false
+        loadErrorPage(for: webView.url ?? navigationActionURL, error: error)
         delegate?.tabDidFail(self, error: error)
     }
 
@@ -759,23 +811,25 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
     ) {
-        guard let url = navigationAction.request.url else {
+        guard let targetURL = navigationAction.request.url else {
             decisionHandler(.cancel)
             return
         }
 
-        if url.path.hasSuffix(".user.js") || url.absoluteString.hasSuffix(".user.js") {
+        navigationActionURL = targetURL
+
+        if targetURL.path.hasSuffix(".user.js") || targetURL.absoluteString.hasSuffix(".user.js") {
             decisionHandler(.cancel)
-            NotificationCenter.default.post(name: NSNotification.Name("InstallUserScriptNotification"), object: url)
+            NotificationCenter.default.post(name: NSNotification.Name("InstallUserScriptNotification"), object: targetURL)
             return
         }
 
-        let scheme = url.scheme?.lowercased() ?? ""
+        let scheme = targetURL.scheme?.lowercased() ?? ""
 
         if ["http", "https", "about", "data", "blob"].contains(scheme) {
             if navigationAction.targetFrame == nil {
-                webView.load(navigationAction.request)
                 decisionHandler(.cancel)
+                delegate?.tabRequestNewTab(url: targetURL)
                 return
             }
 
@@ -785,12 +839,12 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
 
         decisionHandler(.cancel)
 
-        if scheme == "intent", let fallbackURL = fallbackURL(from: url) {
+        if scheme == "intent", let fallbackURL = fallbackURL(from: targetURL) {
             webView.load(URLRequest(url: fallbackURL))
             return
         }
 
-        UIApplication.shared.open(url, options: [:], completionHandler: nil)
+        UIApplication.shared.open(targetURL, options: [:], completionHandler: nil)
     }
 
     private func fallbackURL(from intentURL: URL) -> URL? {
