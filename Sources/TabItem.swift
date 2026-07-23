@@ -66,9 +66,6 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         super.init()
 
         webView.customUserAgent = UserAgentStore.shared.getSelectedUA()
-        if isDesktop {
-            webView.pageZoom = 0.45
-        }
 
         userContentController.add(self, name: "GM")
 
@@ -442,7 +439,6 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
 
         let isDesktopMode = UserAgentStore.shared.getSelectedId() == "default_mac"
         preferences.preferredContentMode = isDesktopMode ? .desktop : .mobile
-        webView.pageZoom = isDesktopMode ? 0.45 : 1.0
 
         let scheme = targetURL.scheme?.lowercased() ?? ""
 
