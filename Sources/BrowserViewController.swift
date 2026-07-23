@@ -21,6 +21,10 @@ class TouchButton: UIButton {
     private let hapticGenerator = UIImpactFeedbackGenerator(style: .medium)
     var hitTestInsets: UIEdgeInsets = .zero
 
+    convenience init(type buttonType: UIButton.ButtonType) {
+        self.init(frame: .zero)
+    }
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         setupFeedback()
