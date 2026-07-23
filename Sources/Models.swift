@@ -395,9 +395,15 @@ final class WebsiteCleaner {
             WKWebsiteDataTypeOfflineWebApplicationCache,
             WKWebsiteDataTypeFetchCache
         ]
-        WKWebsiteDataStore.default().removeData(ofTypes: cacheTypes, modifiedSince: .distantPast) {
-            DispatchQueue.main.async {
-                completion?()
+        let allTypes = WKWebsiteDataStore.allWebsiteDataTypes()
+        WKWebsiteDataStore.default().fetchDataRecords(ofTypes: allTypes) { records in
+            let unprotected = records.filter { !CookieLockStore.shared.isLocked(domain: $0.displayName) }
+            guard !unprotected.isEmpty else {
+                DispatchQueue.main.async { completion?() }
+                return
+            }
+            WKWebsiteDataStore.default().removeData(ofTypes: cacheTypes, for: unprotected) {
+                DispatchQueue.main.async { completion?() }
             }
         }
     }
@@ -406,28 +412,12 @@ final class WebsiteCleaner {
         let allTypes = WKWebsiteDataStore.allWebsiteDataTypes()
         WKWebsiteDataStore.default().fetchDataRecords(ofTypes: allTypes) { records in
             let unprotected = records.filter { !CookieLockStore.shared.isLocked(domain: $0.displayName) }
-            let group = DispatchGroup()
-
-            if !unprotected.isEmpty {
-                group.enter()
-                WKWebsiteDataStore.default().removeData(ofTypes: allTypes, for: unprotected) {
-                    group.leave()
-                }
+            guard !unprotected.isEmpty else {
+                DispatchQueue.main.async { completion?() }
+                return
             }
-
-            group.enter()
-            let cacheTypes: Set<String> = [
-                WKWebsiteDataTypeDiskCache,
-                WKWebsiteDataTypeMemoryCache,
-                WKWebsiteDataTypeOfflineWebApplicationCache,
-                WKWebsiteDataTypeFetchCache
-            ]
-            WKWebsiteDataStore.default().removeData(ofTypes: cacheTypes, modifiedSince: .distantPast) {
-                group.leave()
-            }
-
-            group.notify(queue: .main) {
-                completion?()
+            WKWebsiteDataStore.default().removeData(ofTypes: allTypes, for: unprotected) {
+                DispatchQueue.main.async { completion?() }
             }
         }
     }
