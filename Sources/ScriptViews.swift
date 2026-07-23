@@ -9,198 +9,66 @@ struct CustomBottomSheetItem {
     let handler: (() -> Void)?
 }
 
-final class CustomBottomSheetViewController: UIViewController {
+final class CustomBottomSheetViewController: UITableViewController {
     private let titleString: String
     private let subtitleString: String?
     private let items: [CustomBottomSheetItem]
-
-    private let dimmingView = UIView()
-    private let containerView = UIView()
 
     init(title: String, subtitle: String? = nil, items: [CustomBottomSheetItem]) {
         self.titleString = title
         self.subtitleString = subtitle
         self.items = items
-        super.init(nibName: nil, bundle: nil)
-        modalPresentationStyle = .overFullScreen
-        modalTransitionStyle = .crossDissolve
+        super.init(style: .insetGrouped)
     }
 
     required init?(coder: NSCoder) { nil }
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        setupViews()
+        self.title = titleString
+        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "SheetCell")
+        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "关闭", style: .plain, target: self, action: #selector(handleClose))
     }
 
-    private func setupViews() {
-        view.backgroundColor = .clear
-
-        dimmingView.translatesAutoresizingMaskIntoConstraints = false
-        dimmingView.backgroundColor = UIColor.black.withAlphaComponent(0.4)
-        let tapDimming = UITapGestureRecognizer(target: self, action: #selector(handleDismiss))
-        dimmingView.addGestureRecognizer(tapDimming)
-
-        containerView.translatesAutoresizingMaskIntoConstraints = false
-        containerView.backgroundColor = .secondarySystemGroupedBackground
-        containerView.layer.cornerRadius = 20
-        containerView.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
-        containerView.clipsToBounds = true
-
-        let handleBar = UIView()
-        handleBar.translatesAutoresizingMaskIntoConstraints = false
-        handleBar.backgroundColor = .systemGray4
-        handleBar.layer.cornerRadius = 2.5
-
-        let headerStack = UIStackView()
-        headerStack.translatesAutoresizingMaskIntoConstraints = false
-        headerStack.axis = .vertical
-        headerStack.spacing = 2
-        headerStack.alignment = .leading
-
-        let titleLabel = UILabel()
-        titleLabel.font = .systemFont(ofSize: 17, weight: .semibold)
-        titleLabel.textColor = .label
-        titleLabel.text = titleString
-        headerStack.addArrangedSubview(titleLabel)
-
-        if let sub = subtitleString, !sub.isEmpty {
-            let subLabel = UILabel()
-            subLabel.font = .systemFont(ofSize: 12, weight: .regular)
-            subLabel.textColor = .secondaryLabel
-            subLabel.text = sub
-            headerStack.addArrangedSubview(subLabel)
-        }
-
-        let closeButton = TouchButton(type: .system)
-        closeButton.translatesAutoresizingMaskIntoConstraints = false
-        closeButton.tintColor = .tertiaryLabel
-        closeButton.setImage(UIImage(systemName: "xmark.circle.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .medium)), for: .normal)
-        closeButton.addTarget(self, action: #selector(handleDismiss), for: .touchUpInside)
-
-        let scroll = UIScrollView()
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-
-        let itemsStack = UIStackView()
-        itemsStack.translatesAutoresizingMaskIntoConstraints = false
-        itemsStack.axis = .vertical
-        itemsStack.spacing = 8
-
-        for (idx, item) in items.enumerated() {
-            let itemView = createItemRow(item: item, index: idx)
-            itemsStack.addArrangedSubview(itemView)
-        }
-
-        scroll.addSubview(itemsStack)
-        containerView.addSubview(handleBar)
-        containerView.addSubview(headerStack)
-        containerView.addSubview(closeButton)
-        containerView.addSubview(scroll)
-
-        view.addSubview(dimmingView)
-        view.addSubview(containerView)
-
-        NSLayoutConstraint.activate([
-            dimmingView.topAnchor.constraint(equalTo: view.topAnchor),
-            dimmingView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            dimmingView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            dimmingView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-
-            containerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            containerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            containerView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            containerView.heightAnchor.constraint(lessThanOrEqualTo: view.heightAnchor, multiplier: 0.8),
-
-            handleBar.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 8),
-            handleBar.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
-            handleBar.widthAnchor.constraint(equalToConstant: 36),
-            handleBar.heightAnchor.constraint(equalToConstant: 5),
-
-            headerStack.topAnchor.constraint(equalTo: handleBar.bottomAnchor, constant: 12),
-            headerStack.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
-            headerStack.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -12),
-
-            closeButton.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -14),
-            closeButton.centerYAnchor.constraint(equalTo: headerStack.centerYAnchor),
-            closeButton.widthAnchor.constraint(equalToConstant: 28),
-            closeButton.heightAnchor.constraint(equalToConstant: 28),
-
-            scroll.topAnchor.constraint(equalTo: headerStack.bottomAnchor, constant: 14),
-            scroll.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
-            scroll.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
-            scroll.bottomAnchor.constraint(equalTo: containerView.safeAreaLayoutGuide.bottomAnchor, constant: -12),
-
-            itemsStack.topAnchor.constraint(equalTo: scroll.topAnchor),
-            itemsStack.leadingAnchor.constraint(equalTo: scroll.leadingAnchor),
-            itemsStack.trailingAnchor.constraint(equalTo: scroll.trailingAnchor),
-            itemsStack.bottomAnchor.constraint(equalTo: scroll.bottomAnchor),
-            itemsStack.widthAnchor.constraint(equalTo: scroll.widthAnchor)
-        ])
+    @objc private func handleClose() {
+        dismiss(animated: true)
     }
 
-    private func createItemRow(item: CustomBottomSheetItem, index: Int) -> UIView {
-        let row = TouchButton(type: .custom)
-        row.backgroundColor = .systemBackground
-        row.layer.cornerRadius = 12
-        row.clipsToBounds = true
-        row.tag = index
-        row.addTarget(self, action: #selector(handleItemTap(_:)), for: .touchUpInside)
-
-        let icon = UIImageView()
-        icon.translatesAutoresizingMaskIntoConstraints = false
-        icon.contentMode = .scaleAspectFit
-        let color: UIColor = item.isDestructive ? .systemRed : .systemBlue
-        icon.tintColor = color
-        icon.image = UIImage(systemName: item.iconName, withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .regular))
-
-        let labelStack = UIStackView()
-        labelStack.translatesAutoresizingMaskIntoConstraints = false
-        labelStack.axis = .vertical
-        labelStack.spacing = 2
-        labelStack.isUserInteractionEnabled = false
-
-        let title = UILabel()
-        title.font = .systemFont(ofSize: 15, weight: .medium)
-        title.textColor = item.isDestructive ? .systemRed : .label
-        title.text = item.title
-        labelStack.addArrangedSubview(title)
-
-        if let sub = item.subtitle, !sub.isEmpty {
-            let subLabel = UILabel()
-            subLabel.font = .systemFont(ofSize: 12, weight: .regular)
-            subLabel.textColor = .secondaryLabel
-            subLabel.text = sub
-            labelStack.addArrangedSubview(subLabel)
-        }
-
-        row.addSubview(icon)
-        row.addSubview(labelStack)
-
-        NSLayoutConstraint.activate([
-            row.heightAnchor.constraint(greaterThanOrEqualToConstant: 50),
-            icon.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 14),
-            icon.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: 24),
-            icon.heightAnchor.constraint(equalToConstant: 24),
-
-            labelStack.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 12),
-            labelStack.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -14),
-            labelStack.topAnchor.constraint(equalTo: row.topAnchor, constant: 10),
-            labelStack.bottomAnchor.constraint(equalTo: row.bottomAnchor, constant: -10)
-        ])
-
-        return row
+    override func numberOfSections(in tableView: UITableView) -> Int {
+        return 1
     }
 
-    @objc private func handleItemTap(_ sender: UIButton) {
-        let item = items[sender.tag]
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return items.count
+    }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = UITableViewCell(style: .subtitle, reuseIdentifier: "SheetCell")
+        let item = items[indexPath.row]
+
+        var content = cell.defaultContentConfiguration()
+        content.text = item.title
+        content.secondaryText = item.subtitle
+        content.image = UIImage(systemName: item.iconName)
+
+        if item.isDestructive {
+            content.textProperties.color = .systemRed
+            content.imageProperties.tintColor = .systemRed
+        } else {
+            content.textProperties.color = .label
+            content.imageProperties.tintColor = .systemBlue
+        }
+
+        cell.contentConfiguration = content
+        return cell
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        let item = items[indexPath.row]
         dismiss(animated: true) {
             item.handler?()
         }
-    }
-
-    @objc private func handleDismiss() {
-        dismiss(animated: true)
     }
 }
 
