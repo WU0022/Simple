@@ -217,9 +217,8 @@ final class EyeProtectionManager {
 
     func setLevel(_ newLevel: Level, in window: UIWindow?) {
         level = newLevel
-        if isEnabled {
-            applyOverlay(in: window)
-        }
+        isEnabled = true
+        applyOverlay(in: window)
     }
 
     private func applyOverlay(in window: UIWindow?) {
