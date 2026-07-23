@@ -34,6 +34,51 @@ enum CustomBottomSheetLayout {
     case list
 }
 
+enum SearchEngine: String, CaseIterable, Codable {
+    case google = "google"
+    case bingInt = "bing_int"
+    case yandex = "yandex"
+
+    var name: String {
+        switch self {
+        case .google: return "Google"
+        case .bingInt: return "Bing 国际版"
+        case .yandex: return "Yandex"
+        }
+    }
+
+    func searchURL(query: String) -> URL? {
+        guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return nil }
+        switch self {
+        case .google:
+            return URL(string: "https://www.google.com/search?q=\(encoded)")
+        case .bingInt:
+            return URL(string: "https://www.bing.com/search?q=\(encoded)&setmkt=en-US&setlang=en-US")
+        case .yandex:
+            return URL(string: "https://yandex.com/search/?text=\(encoded)")
+        }
+    }
+}
+
+final class SearchEngineStore {
+    static let shared = SearchEngineStore()
+    private let key = "browser_selected_search_engine_v1"
+    private init() {}
+
+    var currentEngine: SearchEngine {
+        get {
+            guard let raw = UserDefaults.standard.string(forKey: key),
+                  let engine = SearchEngine(rawValue: raw) else {
+                return .google
+            }
+            return engine
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: key)
+        }
+    }
+}
+
 struct CustomBottomSheetItem {
     let title: String
     var isDestructive: Bool = false
