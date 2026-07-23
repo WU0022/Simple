@@ -317,7 +317,11 @@ final class ScriptDataStore {
     }
 
     func setValue(scriptId: String, name: String, value: Any) {
-        UserDefaults.standard.set(value, forKey: makeKey(scriptId, name))
+        if value is NSNull {
+            deleteValue(scriptId: scriptId, name: name)
+        } else {
+            UserDefaults.standard.set(value, forKey: makeKey(scriptId, name))
+        }
     }
 
     func deleteValue(scriptId: String, name: String) {
@@ -348,10 +352,19 @@ final class ScriptDataStore {
         for (k, v) in UserDefaults.standard.dictionaryRepresentation() {
             if k.hasPrefix(prefix) {
                 let name = String(k.dropFirst(prefix.count))
-                dict[name] = v
+                if JSONSerialization.isValidJSONObject([name: v]) {
+                    dict[name] = v
+                } else if let strVal = v as? String {
+                    dict[name] = strVal
+                } else if let numVal = v as? NSNumber {
+                    dict[name] = numVal
+                } else if let boolVal = v as? Bool {
+                    dict[name] = boolVal
+                }
             }
         }
-        if let data = try? JSONSerialization.data(withJSONObject: dict, options: []),
+        if JSONSerialization.isValidJSONObject(dict),
+           let data = try? JSONSerialization.data(withJSONObject: dict, options: []),
            let str = String(data: data, encoding: .utf8) {
             return str
         }
@@ -369,6 +382,19 @@ protocol TabItemDelegate: AnyObject {
     func tabDidUpdate(_ tab: TabItem)
     func tabDidFail(_ tab: TabItem, error: Error)
     func tabRequestNewTab(url: URL)
+}
+
+private final class WeakScriptMessageHandler: NSObject, WKScriptMessageHandler {
+    private weak var delegate: WKScriptMessageHandler?
+
+    init(delegate: WKScriptMessageHandler) {
+        self.delegate = delegate
+        super.init()
+    }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        delegate?.userContentController(userContentController, didReceive: message)
+    }
 }
 
 final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
@@ -400,7 +426,7 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
 
         webView.customUserAgent = UserAgentStore.shared.getSelectedUA()
 
-        userContentController.add(self, name: "GM")
+        userContentController.add(WeakScriptMessageHandler(delegate: self), name: "GM")
 
         webView.navigationDelegate = self
         webView.uiDelegate = self
@@ -446,18 +472,16 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
             let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
                 DispatchQueue.main.async {
                     if let error = error {
-                        let errEscaped = error.localizedDescription.replacingOccurrences(of: "'", with: "\\'")
-                        self?.webView.evaluateJavaScript("window.__gm_handleXhrError('\(reqId)', '\(errEscaped)')", completionHandler: nil)
+                        let errJson = (try? String(data: JSONEncoder().encode(error.localizedDescription), encoding: .utf8)) ?? "\"\""
+                        self?.webView.evaluateJavaScript("window.__gm_handleXhrError('\(reqId)', \(errJson))", completionHandler: nil)
                         return
                     }
 
                     let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 200
                     let responseText = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
-                    let jsonTextData = try? JSONSerialization.data(withJSONObject: [responseText], options: [])
-                    let jsonText = jsonTextData.flatMap { String(data: $0, encoding: .utf8) } ?? "[\"\"]"
-                    let unwrappedText = String(jsonText.dropFirst().dropLast())
+                    let jsonText = (try? String(data: JSONEncoder().encode(responseText), encoding: .utf8)) ?? "\"\""
 
-                    self?.webView.evaluateJavaScript("window.__gm_handleXhrResponse('\(reqId)', \(statusCode), \(unwrappedText))", completionHandler: nil)
+                    self?.webView.evaluateJavaScript("window.__gm_handleXhrResponse('\(reqId)', \(statusCode), \(jsonText))", completionHandler: nil)
                 }
             }
             task.resume()
@@ -692,12 +716,6 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         let scheme = url.scheme?.lowercased() ?? ""
 
         if ["http", "https", "about", "data", "blob"].contains(scheme) {
-            if navigationAction.targetFrame == nil {
-                webView.load(navigationAction.request)
-                decisionHandler(.cancel)
-                return
-            }
-
             decisionHandler(.allow)
             return
         }
