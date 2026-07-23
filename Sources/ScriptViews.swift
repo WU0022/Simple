@@ -1,6 +1,11 @@
 import UIKit
 import WebKit
 
+enum CustomBottomSheetLayout {
+    case grid
+    case list
+}
+
 struct CustomBottomSheetItem {
     let title: String
     var isDestructive: Bool = false
@@ -10,13 +15,15 @@ struct CustomBottomSheetItem {
 final class CustomBottomSheetViewController: UIViewController {
     private let titleString: String
     private let items: [CustomBottomSheetItem]
+    private let layout: CustomBottomSheetLayout
 
     private let dimmingView = UIView()
     private let containerView = UIView()
 
-    init(title: String, items: [CustomBottomSheetItem]) {
+    init(title: String, items: [CustomBottomSheetItem], layout: CustomBottomSheetLayout = .list) {
         self.titleString = title
         self.items = items
+        self.layout = layout
         super.init(nibName: nil, bundle: nil)
         modalPresentationStyle = .overFullScreen
         modalTransitionStyle = .crossDissolve
@@ -33,13 +40,13 @@ final class CustomBottomSheetViewController: UIViewController {
         view.backgroundColor = .clear
 
         dimmingView.translatesAutoresizingMaskIntoConstraints = false
-        dimmingView.backgroundColor = UIColor.black.withAlphaComponent(0.4)
+        dimmingView.backgroundColor = UIColor.black.withAlphaComponent(0.3)
         let tapDimming = UITapGestureRecognizer(target: self, action: #selector(handleDismiss))
         dimmingView.addGestureRecognizer(tapDimming)
 
         containerView.translatesAutoresizingMaskIntoConstraints = false
-        containerView.backgroundColor = .secondarySystemGroupedBackground
-        containerView.layer.cornerRadius = 20
+        containerView.backgroundColor = UIColor(red: 0.95, green: 0.95, blue: 0.96, alpha: 1.0)
+        containerView.layer.cornerRadius = 28
         containerView.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
         containerView.clipsToBounds = true
 
@@ -60,42 +67,19 @@ final class CustomBottomSheetViewController: UIViewController {
         closeButton.setImage(UIImage(systemName: "xmark.circle.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .medium)), for: .normal)
         closeButton.addTarget(self, action: #selector(handleDismiss), for: .touchUpInside)
 
-        let itemsStack = UIStackView()
-        itemsStack.translatesAutoresizingMaskIntoConstraints = false
-        itemsStack.axis = .vertical
-        itemsStack.spacing = 8
+        let contentContainer = UIView()
+        contentContainer.translatesAutoresizingMaskIntoConstraints = false
 
-        for (idx, item) in items.enumerated() {
-            let row = TouchButton(type: .custom)
-            row.backgroundColor = .systemBackground
-            row.layer.cornerRadius = 12
-            row.clipsToBounds = true
-            row.tag = idx
-            row.addTarget(self, action: #selector(handleItemTap(_:)), for: .touchUpInside)
-
-            let label = UILabel()
-            label.translatesAutoresizingMaskIntoConstraints = false
-            label.font = .systemFont(ofSize: 15, weight: .medium)
-            label.textColor = item.isDestructive ? .systemRed : .label
-            label.text = item.title
-            label.textAlignment = .center
-
-            row.addSubview(label)
-            NSLayoutConstraint.activate([
-                row.heightAnchor.constraint(equalToConstant: 48),
-                label.centerXAnchor.constraint(equalTo: row.centerXAnchor),
-                label.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-                label.leadingAnchor.constraint(greaterThanOrEqualTo: row.leadingAnchor, constant: 12),
-                label.trailingAnchor.constraint(lessThanOrEqualTo: row.trailingAnchor, constant: -12)
-            ])
-
-            itemsStack.addArrangedSubview(row)
+        if layout == .grid {
+            setupGridLayout(in: contentContainer)
+        } else {
+            setupListLayout(in: contentContainer)
         }
 
         containerView.addSubview(handleBar)
         containerView.addSubview(titleLabel)
         containerView.addSubview(closeButton)
-        containerView.addSubview(itemsStack)
+        containerView.addSubview(contentContainer)
 
         view.addSubview(dimmingView)
         view.addSubview(containerView)
@@ -116,18 +100,114 @@ final class CustomBottomSheetViewController: UIViewController {
             handleBar.heightAnchor.constraint(equalToConstant: 5),
 
             titleLabel.topAnchor.constraint(equalTo: handleBar.bottomAnchor, constant: 12),
-            titleLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
+            titleLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 18),
 
             closeButton.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -14),
             closeButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
             closeButton.widthAnchor.constraint(equalToConstant: 28),
             closeButton.heightAnchor.constraint(equalToConstant: 28),
 
-            itemsStack.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 14),
-            itemsStack.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
-            itemsStack.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
-            itemsStack.bottomAnchor.constraint(equalTo: containerView.safeAreaLayoutGuide.bottomAnchor, constant: -14)
+            contentContainer.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 14),
+            contentContainer.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 16),
+            contentContainer.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -16),
+            contentContainer.bottomAnchor.constraint(equalTo: containerView.safeAreaLayoutGuide.bottomAnchor, constant: -14)
         ])
+    }
+
+    private func setupGridLayout(in container: UIView) {
+        let mainStack = UIStackView()
+        mainStack.translatesAutoresizingMaskIntoConstraints = false
+        mainStack.axis = .vertical
+        mainStack.spacing = 10
+
+        let gridItems = items.filter { !$0.isDestructive }
+        let destructiveItems = items.filter { $0.isDestructive }
+
+        var rowStack: UIStackView?
+        for (idx, item) in gridItems.enumerated() {
+            if idx % 2 == 0 {
+                rowStack = UIStackView()
+                rowStack?.axis = .horizontal
+                rowStack?.spacing = 10
+                rowStack?.distribution = .fillEqually
+                mainStack.addArrangedSubview(rowStack!)
+            }
+
+            let card = createCardButton(item: item, tag: idx, height: 72)
+            rowStack?.addArrangedSubview(card)
+        }
+
+        if gridItems.count % 2 != 0 {
+            let spacer = UIView()
+            rowStack?.addArrangedSubview(spacer)
+        }
+
+        for item in destructiveItems {
+            let idx = items.firstIndex(where: { $0.title == item.title }) ?? 0
+            let card = createCardButton(item: item, tag: idx, height: 52)
+            mainStack.addArrangedSubview(card)
+        }
+
+        container.addSubview(mainStack)
+        NSLayoutConstraint.activate([
+            mainStack.topAnchor.constraint(equalTo: container.topAnchor),
+            mainStack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            mainStack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            mainStack.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+        ])
+    }
+
+    private func setupListLayout(in container: UIView) {
+        let itemsStack = UIStackView()
+        itemsStack.translatesAutoresizingMaskIntoConstraints = false
+        itemsStack.axis = .vertical
+        itemsStack.spacing = 8
+
+        for (idx, item) in items.enumerated() {
+            let card = createCardButton(item: item, tag: idx, height: 50)
+            itemsStack.addArrangedSubview(card)
+        }
+
+        container.addSubview(itemsStack)
+        NSLayoutConstraint.activate([
+            itemsStack.topAnchor.constraint(equalTo: container.topAnchor),
+            itemsStack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            itemsStack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            itemsStack.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+        ])
+    }
+
+    private func createCardButton(item: CustomBottomSheetItem, tag: Int, height: CGFloat) -> TouchButton {
+        let card = TouchButton(type: .custom)
+        card.translatesAutoresizingMaskIntoConstraints = false
+        card.backgroundColor = .white
+        card.layer.cornerRadius = 18
+        card.layer.shadowColor = UIColor.black.cgColor
+        card.layer.shadowOpacity = 0.03
+        card.layer.shadowRadius = 8
+        card.layer.shadowOffset = CGSize(width: 0, height: 2)
+        card.clipsToBounds = false
+        card.tag = tag
+        card.addTarget(self, action: #selector(handleItemTap(_:)), for: .touchUpInside)
+
+        let label = UILabel()
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.font = .systemFont(ofSize: 15, weight: .medium)
+        label.textColor = item.isDestructive ? .systemRed : .label
+        label.text = item.title
+        label.textAlignment = .center
+        label.numberOfLines = 2
+
+        card.addSubview(label)
+        NSLayoutConstraint.activate([
+            card.heightAnchor.constraint(equalToConstant: height),
+            label.centerXAnchor.constraint(equalTo: card.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: card.centerYAnchor),
+            label.leadingAnchor.constraint(greaterThanOrEqualTo: card.leadingAnchor, constant: 10),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: card.trailingAnchor, constant: -10)
+        ])
+
+        return card
     }
 
     @objc private func handleItemTap(_ sender: UIButton) {
