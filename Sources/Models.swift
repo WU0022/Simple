@@ -192,7 +192,8 @@ final class CookieLockStore {
         let locked = getLockedDomains()
         let cleanDomain = domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
         return locked.contains { lockedDomain in
-            cleanDomain == lockedDomain || cleanDomain.hasSuffix("." + lockedDomain)
+            let cleanLocked = lockedDomain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            return cleanDomain == cleanLocked || cleanDomain.hasSuffix("." + cleanLocked) || cleanLocked.hasSuffix("." + cleanDomain)
         }
     }
 
@@ -317,11 +318,7 @@ final class ScriptDataStore {
     }
 
     func setValue(scriptId: String, name: String, value: Any) {
-        if value is NSNull {
-            deleteValue(scriptId: scriptId, name: name)
-        } else {
-            UserDefaults.standard.set(value, forKey: makeKey(scriptId, name))
-        }
+        UserDefaults.standard.set(value, forKey: makeKey(scriptId, name))
     }
 
     func deleteValue(scriptId: String, name: String) {
@@ -352,19 +349,10 @@ final class ScriptDataStore {
         for (k, v) in UserDefaults.standard.dictionaryRepresentation() {
             if k.hasPrefix(prefix) {
                 let name = String(k.dropFirst(prefix.count))
-                if JSONSerialization.isValidJSONObject([name: v]) {
-                    dict[name] = v
-                } else if let strVal = v as? String {
-                    dict[name] = strVal
-                } else if let numVal = v as? NSNumber {
-                    dict[name] = numVal
-                } else if let boolVal = v as? Bool {
-                    dict[name] = boolVal
-                }
+                dict[name] = v
             }
         }
-        if JSONSerialization.isValidJSONObject(dict),
-           let data = try? JSONSerialization.data(withJSONObject: dict, options: []),
+        if let data = try? JSONSerialization.data(withJSONObject: dict, options: []),
            let str = String(data: data, encoding: .utf8) {
             return str
         }
@@ -384,19 +372,6 @@ protocol TabItemDelegate: AnyObject {
     func tabRequestNewTab(url: URL)
 }
 
-private final class WeakScriptMessageHandler: NSObject, WKScriptMessageHandler {
-    private weak var delegate: WKScriptMessageHandler?
-
-    init(delegate: WKScriptMessageHandler) {
-        self.delegate = delegate
-        super.init()
-    }
-
-    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        delegate?.userContentController(userContentController, didReceive: message)
-    }
-}
-
 final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     let id = UUID()
     let webView: WKWebView
@@ -407,6 +382,7 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
     var registeredCommands: [RegisteredMenuCommand] = []
 
     private var hasInjectedScriptsForCurrentPage = false
+    private var hasRetriedForCurrentNavigation = false
     weak var delegate: TabItemDelegate?
 
     override init() {
@@ -426,7 +402,7 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
 
         webView.customUserAgent = UserAgentStore.shared.getSelectedUA()
 
-        userContentController.add(WeakScriptMessageHandler(delegate: self), name: "GM")
+        userContentController.add(self, name: "GM")
 
         webView.navigationDelegate = self
         webView.uiDelegate = self
@@ -472,16 +448,18 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
             let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
                 DispatchQueue.main.async {
                     if let error = error {
-                        let errJson = (try? String(data: JSONEncoder().encode(error.localizedDescription), encoding: .utf8)) ?? "\"\""
-                        self?.webView.evaluateJavaScript("window.__gm_handleXhrError('\(reqId)', \(errJson))", completionHandler: nil)
+                        let errEscaped = error.localizedDescription.replacingOccurrences(of: "'", with: "\\'")
+                        self?.webView.evaluateJavaScript("window.__gm_handleXhrError('\(reqId)', '\(errEscaped)')", completionHandler: nil)
                         return
                     }
 
                     let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 200
                     let responseText = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
-                    let jsonText = (try? String(data: JSONEncoder().encode(responseText), encoding: .utf8)) ?? "\"\""
+                    let jsonTextData = try? JSONSerialization.data(withJSONObject: [responseText], options: [])
+                    let jsonText = jsonTextData.flatMap { String(data: $0, encoding: .utf8) } ?? "[\"\"]"
+                    let unwrappedText = String(jsonText.dropFirst().dropLast())
 
-                    self?.webView.evaluateJavaScript("window.__gm_handleXhrResponse('\(reqId)', \(statusCode), \(jsonText))", completionHandler: nil)
+                    self?.webView.evaluateJavaScript("window.__gm_handleXhrResponse('\(reqId)', \(statusCode), \(unwrappedText))", completionHandler: nil)
                 }
             }
             task.resume()
@@ -653,6 +631,7 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         isLoading = true
         hasInjectedScriptsForCurrentPage = false
+        hasRetriedForCurrentNavigation = false
         registeredCommands.removeAll()
         delegate?.tabDidUpdate(self)
     }
@@ -685,6 +664,12 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         withError error: Error
     ) {
         isLoading = false
+        let nsError = error as NSError
+        if (nsError.code == NSURLErrorCannotConnectToHost || nsError.code == NSURLErrorNetworkConnectionLost || nsError.code == NSURLErrorTimedOut) && !hasRetriedForCurrentNavigation {
+            hasRetriedForCurrentNavigation = true
+            webView.reload()
+            return
+        }
         delegate?.tabDidFail(self, error: error)
     }
 
@@ -694,6 +679,12 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         withError error: Error
     ) {
         isLoading = false
+        let nsError = error as NSError
+        if (nsError.code == NSURLErrorCannotConnectToHost || nsError.code == NSURLErrorNetworkConnectionLost || nsError.code == NSURLErrorTimedOut) && !hasRetriedForCurrentNavigation {
+            hasRetriedForCurrentNavigation = true
+            webView.reload()
+            return
+        }
         delegate?.tabDidFail(self, error: error)
     }
 
@@ -716,6 +707,12 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         let scheme = url.scheme?.lowercased() ?? ""
 
         if ["http", "https", "about", "data", "blob"].contains(scheme) {
+            if navigationAction.targetFrame == nil {
+                webView.load(navigationAction.request)
+                decisionHandler(.cancel)
+                return
+            }
+
             decisionHandler(.allow)
             return
         }
