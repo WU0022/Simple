@@ -647,6 +647,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         guard tabs.indices.contains(index) else { return }
         resetProgress()
 
+        let isClosingActiveTab = (index == activeTabIndex)
         let tab = tabs[index]
         tab.destroy()
         tabs.remove(at: index)
@@ -657,9 +658,15 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             return
         }
 
-        let nextIndex = min(index, tabs.count - 1)
-        activeTabIndex = min(activeTabIndex, tabs.count - 1)
-        switchTab(to: nextIndex)
+        if isClosingActiveTab {
+            activeTabIndex = min(index, tabs.count - 1)
+            switchTab(to: activeTabIndex)
+        } else {
+            if index < activeTabIndex {
+                activeTabIndex -= 1
+            }
+            updateUIState()
+        }
     }
 
     private func closeAllTabs() {
@@ -1028,11 +1035,14 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             activeTab.clearFailureState()
             failureOverlayView.isHidden = true
 
-            if let originURL = originURL {
-                activeTab.url = originURL
-                let rawString = originURL.absoluteString.removingPercentEncoding ?? originURL.absoluteString
-                addressField.text = originURL.host?.removingPercentEncoding ?? originURL.host ?? rawString
+            if activeTab.webView.canGoBack {
+                activeTab.webView.goBack()
                 updateUIState()
+                return
+            }
+
+            if let originURL = originURL {
+                load(url: originURL)
                 return
             }
 
@@ -1041,12 +1051,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
                 let closingIndex = activeTabIndex
                 closeTab(at: closingIndex)
                 switchTab(to: sourceIndex)
-                return
-            }
-
-            if activeTab.webView.canGoBack {
-                activeTab.webView.goBack()
-                updateUIState()
                 return
             }
 
@@ -1334,7 +1338,9 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
                 guard let self = self else { return }
                 let targetId = isDesktop ? "default_safari" : "default_mac"
                 UserAgentStore.shared.setSelectedId(targetId)
-                self.activeTab.webView.customUserAgent = UserAgentStore.shared.getSelectedUA()
+                let newUA = UserAgentStore.shared.getSelectedUA()
+                self.activeTab.webView.customUserAgent = newUA
+                self.activeTab.webView.configuration.defaultWebpagePreferences.preferredContentMode = isDesktop ? .mobile : .desktop
                 self.activeTab.webView.reloadFromOrigin()
             }
         ))
