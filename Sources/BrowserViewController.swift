@@ -71,9 +71,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     private let bottomPanel = UIView()
     private let addressShadowView = UIView()
     private let addressContainer = UIView()
-    private let siteSettingsButton = TouchButton(type: .system)
-    private let lockIconImageView = UIImageView()
-    private let searchIconImageView = UIImageView()
+    private let lockButton = TouchButton(type: .system)
     private let addressField = UITextField()
     private let refreshButton = TouchButton(type: .system)
     private let clearButton = TouchButton(type: .system)
@@ -152,7 +150,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         let task = URLSession.shared.dataTask(with: scriptURL) { [weak self] data, response, error in
             guard let data = data, let code = String(data: data, encoding: .utf8), !code.isEmpty else { return }
-            let (parsedName, parsedMatch) = UserScriptStore.shared.parseMetadata(from: code)
+            let (parsedName, parsedMatch, parsedIcon) = UserScriptStore.shared.parseMetadata(from: code)
 
             DispatchQueue.main.async {
                 let alert = UIAlertController(
@@ -168,7 +166,8 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
                         name: parsedName,
                         matchPattern: parsedMatch,
                         code: code,
-                        isEnabled: true
+                        isEnabled: true,
+                        iconURL: parsedIcon
                     )
                     scripts.append(newScript)
                     UserScriptStore.shared.saveScripts(scripts)
@@ -287,26 +286,16 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         longPressAddress.minimumPressDuration = 0.4
         addressContainer.addGestureRecognizer(longPressAddress)
 
-        siteSettingsButton.translatesAutoresizingMaskIntoConstraints = false
-        siteSettingsButton.tintColor = .secondaryLabel
-        siteSettingsButton.setImage(
+        lockButton.translatesAutoresizingMaskIntoConstraints = false
+        lockButton.tintColor = .secondaryLabel
+        lockButton.setImage(
             UIImage(
-                systemName: "slider.horizontal.3",
+                systemName: "lock.fill",
                 withConfiguration: UIImage.SymbolConfiguration(pointSize: 13, weight: .medium)
             ),
             for: .normal
         )
-        siteSettingsButton.addTarget(self, action: #selector(showSiteDomainSettings), for: .touchUpInside)
-
-        lockIconImageView.translatesAutoresizingMaskIntoConstraints = false
-        lockIconImageView.image = UIImage(systemName: "lock.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .regular))
-        lockIconImageView.tintColor = .secondaryLabel
-        lockIconImageView.contentMode = .scaleAspectFit
-
-        searchIconImageView.translatesAutoresizingMaskIntoConstraints = false
-        searchIconImageView.image = UIImage(systemName: "magnifyingglass", withConfiguration: UIImage.SymbolConfiguration(pointSize: 13, weight: .medium))
-        searchIconImageView.tintColor = .secondaryLabel
-        searchIconImageView.contentMode = .scaleAspectFit
+        lockButton.addTarget(self, action: #selector(showSiteDomainSettings), for: .touchUpInside)
 
         addressField.translatesAutoresizingMaskIntoConstraints = false
         addressField.delegate = self
@@ -374,9 +363,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         navigationStack.addArrangedSubview(tabsButton)
         navigationStack.addArrangedSubview(moreButton)
 
-        addressContainer.addSubview(siteSettingsButton)
-        addressContainer.addSubview(lockIconImageView)
-        addressContainer.addSubview(searchIconImageView)
+        addressContainer.addSubview(lockButton)
         addressContainer.addSubview(addressField)
         addressContainer.addSubview(refreshButton)
         addressContainer.addSubview(clearButton)
@@ -429,22 +416,12 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             addressShadowView.trailingAnchor.constraint(equalTo: addressContainer.trailingAnchor),
             addressShadowView.bottomAnchor.constraint(equalTo: addressContainer.bottomAnchor),
 
-            siteSettingsButton.leadingAnchor.constraint(equalTo: addressContainer.leadingAnchor, constant: 12),
-            siteSettingsButton.centerYAnchor.constraint(equalTo: addressContainer.centerYAnchor),
-            siteSettingsButton.widthAnchor.constraint(equalToConstant: 24),
-            siteSettingsButton.heightAnchor.constraint(equalToConstant: 24),
+            lockButton.leadingAnchor.constraint(equalTo: addressContainer.leadingAnchor, constant: 12),
+            lockButton.centerYAnchor.constraint(equalTo: addressContainer.centerYAnchor),
+            lockButton.widthAnchor.constraint(equalToConstant: 24),
+            lockButton.heightAnchor.constraint(equalToConstant: 24),
 
-            lockIconImageView.leadingAnchor.constraint(equalTo: siteSettingsButton.trailingAnchor, constant: 12),
-            lockIconImageView.centerYAnchor.constraint(equalTo: addressContainer.centerYAnchor),
-            lockIconImageView.widthAnchor.constraint(equalToConstant: 14),
-            lockIconImageView.heightAnchor.constraint(equalToConstant: 14),
-
-            searchIconImageView.leadingAnchor.constraint(equalTo: lockIconImageView.trailingAnchor, constant: 4),
-            searchIconImageView.centerYAnchor.constraint(equalTo: addressContainer.centerYAnchor),
-            searchIconImageView.widthAnchor.constraint(equalToConstant: 14),
-            searchIconImageView.heightAnchor.constraint(equalToConstant: 14),
-
-            addressField.leadingAnchor.constraint(equalTo: searchIconImageView.trailingAnchor, constant: 6),
+            addressField.leadingAnchor.constraint(equalTo: lockButton.trailingAnchor, constant: 6),
             addressField.trailingAnchor.constraint(equalTo: refreshButton.leadingAnchor, constant: -6),
             addressField.topAnchor.constraint(equalTo: addressContainer.topAnchor),
             addressField.bottomAnchor.constraint(equalTo: addressContainer.bottomAnchor),
