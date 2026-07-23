@@ -436,11 +436,11 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
 
     var sourceTabID: UUID?
     var failedURL: URL?
+    var failureError: Error?
     var isDisplayingFailurePage = false
     var previousURL: URL?
 
     private var hasInjectedScriptsForCurrentPage = false
-    private var isLoadingFailureDocument = false
     private var navigationActionURL: URL?
     weak var delegate: TabItemDelegate?
 
@@ -502,9 +502,7 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let body = message.body as? [String: Any], let action = body["action"] as? String else { return }
 
-        if action == "goBackAction" {
-            delegate?.tabRequestGoBack(self)
-        } else if action == "registerMenuCommand", let cmdId = body["id"] as? Int, let caption = body["caption"] as? String {
+        if action == "registerMenuCommand", let cmdId = body["id"] as? Int, let caption = body["caption"] as? String {
             let scriptId = (body["scriptId"] as? String) ?? ""
             registeredCommands.removeAll { $0.cmdId == cmdId || ($0.scriptId == scriptId && $0.caption == caption) }
             registeredCommands.append(RegisteredMenuCommand(scriptId: scriptId, cmdId: cmdId, caption: caption))
@@ -576,9 +574,9 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
             window.GM_log = function(msg) {
                 console.log('[Tampermonkey]', msg);
             };
-            window.__gm_xhr_callbacks__ = window.__gm_xhr_callbacks__ || {};
             window.GM_xmlhttpRequest = function(opts) {
                 var id = 'xhr_' + Math.random().toString(36).substr(2, 9);
+                window.__gm_xhr_callbacks__ = window.__gm_xhr_callbacks__ || {};
                 window.__gm_xhr_callbacks__[id] = opts;
                 try {
                     window.webkit.messageHandlers.GM.postMessage({
@@ -600,30 +598,22 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
                 delete window.__gm_xhr_callbacks__[id];
                 var res = {
                     status: status,
-                    statusText: status === 200 ? 'OK' : '',
+                    statusText: status === 200 ? 'OK' : 'Error',
                     responseText: text,
                     response: text,
                     readyState: 4,
                     finalUrl: opts.url
                 };
-                if (opts.onload) { opts.onload(res); }
-                if (opts.onreadystatechange) { opts.onreadystatechange(res); }
+                if (opts.onload) opts.onload(res);
+                if (opts.onreadystatechange) opts.onreadystatechange(res);
             };
             window.__gm_handleXhrError = function(id, errorText) {
                 var opts = window.__gm_xhr_callbacks__[id];
                 if (!opts) return;
                 delete window.__gm_xhr_callbacks__[id];
                 var res = { status: 0, statusText: errorText, responseText: errorText, response: errorText, readyState: 4 };
-                if (opts.onerror) { opts.onerror(res); }
+                if (opts.onerror) opts.onerror(res);
             };
-
-            window.GM = window.GM || {};
-            window.GM.xmlHttpRequest = window.GM_xmlhttpRequest;
-            window.GM.setValue = function(k, v) { return new Promise(function(resolve){ GM_setValue(k, v); resolve(); }); };
-            window.GM.getValue = function(k, d) { return new Promise(function(resolve){ resolve(GM_getValue(k, d)); }); };
-            window.GM.deleteValue = function(k) { return new Promise(function(resolve){ GM_deleteValue(k); resolve(); }); };
-            window.GM.addStyle = window.GM_addStyle;
-            window.GM.registerMenuCommand = function(c, f) { return Promise.resolve(GM_registerMenuCommand(c, f)); };
         }
         """
 
@@ -679,6 +669,29 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
                         });
                     } catch(e) {}
                 };
+                var GM_xmlhttpRequest = window.GM_xmlhttpRequest;
+                var GM = {
+                    getValue: function(k, d) { return Promise.resolve(GM_getValue(k, d)); },
+                    setValue: function(k, v) { GM_setValue(k, v); return Promise.resolve(); },
+                    deleteValue: function(k) { GM_deleteValue(k); return Promise.resolve(); },
+                    xmlHttpRequest: function(opts) {
+                        return new Promise(function(resolve, reject) {
+                            var origOnload = opts.onload;
+                            var origOnerror = opts.onerror;
+                            opts.onload = function(res) {
+                                if (origOnload) origOnload(res);
+                                resolve(res);
+                            };
+                            opts.onerror = function(res) {
+                                if (origOnerror) origOnerror(res);
+                                reject(res);
+                            };
+                            GM_xmlhttpRequest(opts);
+                        });
+                    },
+                    addStyle: window.GM_addStyle,
+                    registerMenuCommand: function(c, f) { return Promise.resolve(GM_registerMenuCommand(c, f)); }
+                };
 
                 try {
                     \(script.code)
@@ -715,63 +728,6 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         }
     }
 
-    func loadErrorPage(for targetURL: URL?, error: Error) {
-        let nsError = error as NSError
-        guard nsError.domain != "WebKitErrorDomain" && nsError.code != NSURLErrorCancelled && nsError.code != 102 else { return }
-
-        isDisplayingFailurePage = true
-        isLoadingFailureDocument = true
-        failedURL = targetURL ?? webView.url
-        url = failedURL
-        title = "无法连接服务器"
-
-        var titleStr = "无法连接服务器"
-        var reasonStr = "服务器拒绝连接或已被网络策略/代理拦截。"
-        if nsError.code == NSURLErrorNotConnectedToInternet {
-            titleStr = "未连接网络"
-            reasonStr = "请检查网络连接。"
-        } else if nsError.code == NSURLErrorCannotFindHost {
-            titleStr = "找不到服务器"
-            reasonStr = "域名解析失败。"
-        } else if nsError.code == NSURLErrorTimedOut {
-            titleStr = "连接超时"
-            reasonStr = "网络响应超时。"
-        }
-
-        let urlStr = failedURL?.absoluteString ?? ""
-        let html = """
-        <!DOCTYPE html>
-        <html>
-        <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f5f5f7; color: #1c1c1e; margin: 0; padding: 60px 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 60vh; text-align: center; }
-            h1 { font-size: 20px; font-weight: 600; margin: 0 0 10px 0; color: #1c1c1e; }
-            p { font-size: 14px; color: #8e8e93; margin: 0 0 16px 0; max-width: 320px; line-height: 1.4; }
-            .url-box { font-size: 13px; color: #aeaeb2; word-break: break-all; margin-bottom: 28px; max-width: 300px; }
-            .btn-group { display: flex; gap: 12px; }
-            .btn { background-color: #ffffff; color: #1c1c1e; border: none; padding: 10px 24px; font-size: 14px; font-weight: 500; border-radius: 12px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.06); display: inline-block; -webkit-tap-highlight-color: transparent; }
-            .btn-primary { background-color: #007aff; color: #ffffff; }
-            .btn:active { opacity: 0.7; }
-        </style>
-        </head>
-        <body>
-            <h1>\(titleStr)</h1>
-            <p>\(reasonStr)</p>
-            <div class="url-box">\(urlStr)</div>
-            <div class="btn-group">
-                <button class="btn" onclick="window.webkit.messageHandlers.GM.postMessage({action: 'goBackAction'})">返回上一页</button>
-                <button class="btn btn-primary" onclick="location.reload()">重新加载</button>
-            </div>
-        </body>
-        </html>
-        """
-        webView.loadHTMLString(html, baseURL: failedURL)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-            self?.isLoadingFailureDocument = false
-        }
-    }
-
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         if let targetURL = navigationAction.request.url {
             delegate?.tabRequestNewTab(url: targetURL)
@@ -781,9 +737,7 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         isLoading = true
-        if !isLoadingFailureDocument {
-            isDisplayingFailurePage = false
-        }
+        isDisplayingFailurePage = false
         hasInjectedScriptsForCurrentPage = false
         registeredCommands.removeAll()
         delegate?.tabDidUpdate(self)
@@ -829,8 +783,10 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         withError error: Error
     ) {
         isLoading = false
-        let targetURL = navigationActionURL ?? webView.url
-        loadErrorPage(for: targetURL, error: error)
+        isDisplayingFailurePage = true
+        failedURL = navigationActionURL ?? webView.url
+        failureError = error
+        url = failedURL
         delegate?.tabDidFail(self, error: error)
     }
 
@@ -840,8 +796,10 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         withError error: Error
     ) {
         isLoading = false
-        let targetURL = navigationActionURL ?? webView.url
-        loadErrorPage(for: targetURL, error: error)
+        isDisplayingFailurePage = true
+        failedURL = navigationActionURL ?? webView.url
+        failureError = error
+        url = failedURL
         delegate?.tabDidFail(self, error: error)
     }
 
