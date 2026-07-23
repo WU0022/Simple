@@ -1316,6 +1316,15 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         present(alert, animated: true)
     }
 
+    private func showAdBlockerManager() {
+        let manager = AdBlockManagerViewController()
+        manager.onRulesChanged = { [weak self] in
+            self?.activeTab.webView.reload()
+        }
+        let nav = UINavigationController(rootViewController: manager)
+        present(nav, animated: true)
+    }
+
     @objc private func showMoreMenu() {
         dismissKeyboard()
 
@@ -1337,6 +1346,14 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             },
             longPressHandler: { [weak self] in
                 self?.showEyeProtectionLevelPicker()
+            }
+        ))
+
+        let isAdBlockOn = AdBlockManager.shared.isEnabled
+        items.append(CustomBottomSheetItem(
+            title: isAdBlockOn ? "广告拦截: 开启" : "广告拦截: 关闭",
+            handler: { [weak self] in
+                self?.showAdBlockerManager()
             }
         ))
 
@@ -1366,6 +1383,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
                 let newUA = UserAgentStore.shared.getSelectedUA()
                 self.activeTab.webView.customUserAgent = newUA
                 self.activeTab.webView.configuration.defaultWebpagePreferences.preferredContentMode = isDesktop ? .mobile : .desktop
+                self.activeTab.webView.pageZoom = isDesktop ? 1.0 : 0.45
                 self.activeTab.webView.reloadFromOrigin()
             }
         ))
