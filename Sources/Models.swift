@@ -382,7 +382,7 @@ final class UserScriptStore {
             .components(separatedBy: "/").first ?? script.matchPattern
         let domainPattern = pattern.replacingOccurrences(of: "*.", with: "").replacingOccurrences(of: "*", with: "")
         if domainPattern.isEmpty { return true }
-        return host.contains(domainPattern) || domainPattern.contains(host)
+        return host == domainPattern || host.hasSuffix("." + domainPattern)
     }
 }
 
