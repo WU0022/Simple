@@ -82,9 +82,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     private var webBottomPanelConstraint: NSLayoutConstraint?
     private var webBottomFullscreenConstraint: NSLayoutConstraint?
 
-    private let softWhiteBg = UIColor(red: 246.0 / 255.0, green: 246.0 / 255.0, blue: 244.0 / 255.0, alpha: 1.0)
-    private let softCardWhiteBg = UIColor(red: 250.0 / 255.0, green: 250.0 / 255.0, blue: 247.0 / 255.0, alpha: 1.0)
-
     override var preferredStatusBarStyle: UIStatusBarStyle {
         .darkContent
     }
@@ -114,19 +111,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     deinit {
         NotificationCenter.default.removeObserver(self)
         progressObservation?.invalidate()
-    }
-
-    private func presentActionSheet(_ alert: UIAlertController) {
-        present(alert, animated: true) { [weak alert, weak self] in
-            guard let alert = alert, let superview = alert.view.superview else { return }
-            let tap = UITapGestureRecognizer(target: self, action: #selector(self?.dismissActionSheetOnOutsideTap))
-            tap.cancelsTouchesInView = false
-            superview.addGestureRecognizer(tap)
-        }
-    }
-
-    @objc private func dismissActionSheetOnOutsideTap() {
-        dismiss(animated: true)
     }
 
     private func configureInstallerObserver() {
@@ -165,8 +149,8 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
                     UserScriptStore.shared.saveScripts(scripts)
                     self?.activeTab.reloadUserScripts()
                 })
-
                 alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+
                 self?.present(alert, animated: true)
             }
         }
@@ -174,26 +158,25 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     }
 
     private func configureInterface() {
-        view.backgroundColor = softWhiteBg
+        view.backgroundColor = .systemBackground
 
         webContainer.translatesAutoresizingMaskIntoConstraints = false
-        webContainer.backgroundColor = softWhiteBg
+        webContainer.backgroundColor = .systemBackground
 
         homeView.translatesAutoresizingMaskIntoConstraints = false
-        homeView.backgroundColor = softWhiteBg
+        homeView.backgroundColor = .systemBackground
 
         bottomPanel.translatesAutoresizingMaskIntoConstraints = false
-        bottomPanel.backgroundColor = UIColor(red: 240.0 / 255.0, green: 240.0 / 255.0, blue: 242.0 / 255.0, alpha: 1.0)
+        bottomPanel.backgroundColor = .secondarySystemBackground
 
         addressContainer.translatesAutoresizingMaskIntoConstraints = false
-        addressContainer.backgroundColor = softCardWhiteBg
+        addressContainer.backgroundColor = .systemBackground
         addressContainer.layer.cornerRadius = 18
-        addressContainer.layer.borderWidth = 0.5
-        addressContainer.layer.borderColor = UIColor.separator.withAlphaComponent(0.2).cgColor
+        addressContainer.layer.borderWidth = 0
         addressContainer.layer.shadowColor = UIColor.black.cgColor
-        addressContainer.layer.shadowOpacity = 0.05
-        addressContainer.layer.shadowRadius = 6
-        addressContainer.layer.shadowOffset = CGSize(width: 0, height: 2)
+        addressContainer.layer.shadowOpacity = 0.08
+        addressContainer.layer.shadowRadius = 8
+        addressContainer.layer.shadowOffset = CGSize(width: 0, height: 3)
         addressContainer.clipsToBounds = true
 
         let longPressAddress = UILongPressGestureRecognizer(target: self, action: #selector(handleAddressLongPress(_:)))
@@ -609,17 +592,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     private func showLoadError(_ error: Error) {
         let nsError = error as NSError
 
-        let ignoredErrorCodes: [Int] = [
-            NSURLErrorCancelled,
-            NSURLErrorCannotConnectToHost,
-            NSURLErrorTimedOut,
-            NSURLErrorNetworkConnectionLost,
-            NSURLErrorDNSLookupFailed,
-            NSURLErrorNotConnectedToInternet,
-            102
-        ]
-
-        guard nsError.domain != "WebKitErrorDomain" && !ignoredErrorCodes.contains(nsError.code) else {
+        guard nsError.domain != "WebKitErrorDomain" && nsError.code != NSURLErrorCancelled && nsError.code != 102 else {
             return
         }
 
@@ -632,6 +605,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         alert.addAction(UIAlertAction(title: "重试", style: .default) { [weak self] _ in
             self?.activeTab.webView.reload()
         })
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
 
         present(alert, animated: true)
     }
@@ -679,11 +653,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     func tabDidFail(_ tab: TabItem, error: Error) {
         guard !tabs.isEmpty, tab.id == activeTab.id else {
             return
-        }
-
-        UIView.animate(withDuration: 0.2) {
-            self.progressView.alpha = 0
-            self.progressView.progress = 0
         }
 
         updateUIState()
@@ -1099,6 +1068,26 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     }
 
     private func performCleanData(options: Set<CleanOption>) {
+        if options.contains(.cache) {
+            let cacheTypes: Set<String> = [
+                WKWebsiteDataTypeDiskCache,
+                WKWebsiteDataTypeMemoryCache,
+                WKWebsiteDataTypeOfflineWebApplicationCache
+            ]
+            WKWebsiteDataStore.default().removeData(ofTypes: cacheTypes, modifiedSince: .distantPast) {}
+        }
+
+        if options.contains(.cookies) {
+            let store = WKWebsiteDataStore.default().httpCookieStore
+            store.getAllCookies { cookies in
+                for cookie in cookies {
+                    if !CookieLockStore.shared.isLocked(domain: cookie.domain) {
+                        store.delete(cookie)
+                    }
+                }
+            }
+        }
+
         if options.contains(.searchHistory) {
             SearchHistoryStore.shared.clearHistory()
         }
@@ -1107,23 +1096,9 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             ScriptDataStore.shared.clearAllScriptData()
         }
 
-        if options.contains(.cache) || options.contains(.cookies) {
-            let types = WKWebsiteDataStore.allWebsiteDataTypes()
-            WKWebsiteDataStore.default().fetchDataRecords(ofTypes: types) { records in
-                let unlockedRecords = records.filter { !CookieLockStore.shared.isLocked(domain: $0.displayName) }
-                WKWebsiteDataStore.default().removeData(ofTypes: types, for: unlockedRecords) {
-                    DispatchQueue.main.async { [weak self] in
-                        guard let self = self else { return }
-                        if self.homeView.alpha < 0.5, self.activeTab.url != nil {
-                            self.activeTab.webView.reload()
-                        }
-                    }
-                }
-            }
-        } else {
-            if homeView.alpha < 0.5, activeTab.url != nil {
-                activeTab.webView.reload()
-            }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.showToastNotice("数据清理完成")
+            self?.activeTab.webView.reload()
         }
     }
 }
