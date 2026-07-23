@@ -360,6 +360,57 @@ final class ScriptDataStore {
     }
 }
 
+final class WebsiteCleaner {
+    static let shared = WebsiteCleaner()
+    private init() {}
+
+    func cleanCacheOnly(completion: (() -> Void)? = nil) {
+        let cacheTypes: Set<String> = [
+            WKWebsiteDataTypeDiskCache,
+            WKWebsiteDataTypeMemoryCache,
+            WKWebsiteDataTypeOfflineWebApplicationCache,
+            WKWebsiteDataTypeFetchCache
+        ]
+        WKWebsiteDataStore.default().removeData(ofTypes: cacheTypes, modifiedSince: .distantPast) {
+            DispatchQueue.main.async {
+                completion?()
+            }
+        }
+    }
+
+    func cleanUnprotectedLoginAndData(completion: (() -> Void)? = nil) {
+        let dataTypes = WKWebsiteDataStore.allWebsiteDataTypes()
+        WKWebsiteDataStore.default().fetchDataRecords(ofTypes: dataTypes) { records in
+            let unprotected = records.filter { !CookieLockStore.shared.isLocked(domain: $0.displayName) }
+            WKWebsiteDataStore.default().removeData(ofTypes: dataTypes, for: unprotected) {
+                DispatchQueue.main.async {
+                    completion?()
+                }
+            }
+        }
+    }
+
+    func cleanSingleDomain(record: WKWebsiteDataRecord, cacheOnly: Bool, completion: (() -> Void)? = nil) {
+        let isProtected = CookieLockStore.shared.isLocked(domain: record.displayName)
+        let types: Set<String>
+        if cacheOnly || isProtected {
+            types = [
+                WKWebsiteDataTypeDiskCache,
+                WKWebsiteDataTypeMemoryCache,
+                WKWebsiteDataTypeOfflineWebApplicationCache,
+                WKWebsiteDataTypeFetchCache
+            ]
+        } else {
+            types = WKWebsiteDataStore.allWebsiteDataTypes()
+        }
+        WKWebsiteDataStore.default().removeData(ofTypes: types, for: [record]) {
+            DispatchQueue.main.async {
+                completion?()
+            }
+        }
+    }
+}
+
 struct RegisteredMenuCommand {
     let scriptId: String
     let cmdId: Int
@@ -370,6 +421,7 @@ protocol TabItemDelegate: AnyObject {
     func tabDidUpdate(_ tab: TabItem)
     func tabDidFail(_ tab: TabItem, error: Error)
     func tabRequestNewTab(url: URL)
+    func tabProcessTerminated(_ tab: TabItem)
 }
 
 final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
@@ -382,7 +434,6 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
     var registeredCommands: [RegisteredMenuCommand] = []
 
     private var hasInjectedScriptsForCurrentPage = false
-    private var hasRetriedForCurrentNavigation = false
     weak var delegate: TabItemDelegate?
 
     override init() {
@@ -414,7 +465,30 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
     }
 
     deinit {
+        destroy()
+    }
+
+    func destroy() {
+        delegate = nil
+        webView.navigationDelegate = nil
+        webView.uiDelegate = nil
+        webView.stopLoading()
+        webView.evaluateJavaScript("""
+        (function(){
+            try {
+                var media = document.querySelectorAll('audio, video');
+                for(var i=0; i<media.length; i++){
+                    media[i].pause();
+                    media[i].src = '';
+                    media[i].load();
+                }
+            } catch(e){}
+        })();
+        """, completionHandler: nil)
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "GM")
+        webView.load(URLRequest(url: URL(string: "about:blank")!))
+        webView.removeFromSuperview()
+        snapshot = nil
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -631,7 +705,6 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         isLoading = true
         hasInjectedScriptsForCurrentPage = false
-        hasRetriedForCurrentNavigation = false
         registeredCommands.removeAll()
         delegate?.tabDidUpdate(self)
     }
@@ -658,18 +731,17 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         delegate?.tabDidUpdate(self)
     }
 
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        isLoading = false
+        delegate?.tabProcessTerminated(self)
+    }
+
     func webView(
         _ webView: WKWebView,
         didFailProvisionalNavigation navigation: WKNavigation!,
         withError error: Error
     ) {
         isLoading = false
-        let nsError = error as NSError
-        if (nsError.code == NSURLErrorCannotConnectToHost || nsError.code == NSURLErrorNetworkConnectionLost || nsError.code == NSURLErrorTimedOut) && !hasRetriedForCurrentNavigation {
-            hasRetriedForCurrentNavigation = true
-            webView.reload()
-            return
-        }
         delegate?.tabDidFail(self, error: error)
     }
 
@@ -679,12 +751,6 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         withError error: Error
     ) {
         isLoading = false
-        let nsError = error as NSError
-        if (nsError.code == NSURLErrorCannotConnectToHost || nsError.code == NSURLErrorNetworkConnectionLost || nsError.code == NSURLErrorTimedOut) && !hasRetriedForCurrentNavigation {
-            hasRetriedForCurrentNavigation = true
-            webView.reload()
-            return
-        }
         delegate?.tabDidFail(self, error: error)
     }
 
