@@ -403,13 +403,31 @@ final class WebsiteCleaner {
     }
 
     func cleanUnprotectedLoginAndData(completion: (() -> Void)? = nil) {
-        let dataTypes = WKWebsiteDataStore.allWebsiteDataTypes()
-        WKWebsiteDataStore.default().fetchDataRecords(ofTypes: dataTypes) { records in
+        let allTypes = WKWebsiteDataStore.allWebsiteDataTypes()
+        WKWebsiteDataStore.default().fetchDataRecords(ofTypes: allTypes) { records in
             let unprotected = records.filter { !CookieLockStore.shared.isLocked(domain: $0.displayName) }
-            WKWebsiteDataStore.default().removeData(ofTypes: dataTypes, for: unprotected) {
-                DispatchQueue.main.async {
-                    completion?()
+            let group = DispatchGroup()
+
+            if !unprotected.isEmpty {
+                group.enter()
+                WKWebsiteDataStore.default().removeData(ofTypes: allTypes, for: unprotected) {
+                    group.leave()
                 }
+            }
+
+            group.enter()
+            let cacheTypes: Set<String> = [
+                WKWebsiteDataTypeDiskCache,
+                WKWebsiteDataTypeMemoryCache,
+                WKWebsiteDataTypeOfflineWebApplicationCache,
+                WKWebsiteDataTypeFetchCache
+            ]
+            WKWebsiteDataStore.default().removeData(ofTypes: cacheTypes, modifiedSince: .distantPast) {
+                group.leave()
+            }
+
+            group.notify(queue: .main) {
+                completion?()
             }
         }
     }
