@@ -871,11 +871,12 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         let frameInView = view.convert(keyboardFrame, from: nil)
         let overlap = max(0, view.bounds.maxY - frameInView.minY)
+        let offset = max(0, overlap - 48)
 
         let curve = userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt ?? 7
         let options = UIView.AnimationOptions(rawValue: curve << 16)
 
-        bottomPanelBottomConstraint?.constant = -overlap
+        bottomPanelBottomConstraint?.constant = -offset
 
         UIView.animate(withDuration: duration, delay: 0, options: options) {
             self.view.layoutIfNeeded()
