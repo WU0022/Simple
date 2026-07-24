@@ -15,9 +15,9 @@ final class AdBlockManager {
     private let enabledKey = "adblock_enabled_v1"
     private let subscriptionsKey = "adblock_subscriptions_v1"
     private let customRulesKey = "adblock_custom_rules_v1"
-    private let ruleListIdentifier = "SimpleBrowserAdBlockRules"
 
-    private(set) var compiledRuleList: WKContentRuleList?
+    // 隔离存储：将自定义规则和各个订阅独立编译，防止一个报错导致全部失效
+    private(set) var compiledRuleLists: [String: WKContentRuleList] = [:]
     private var attachedWebViews = NSHashTable<WKWebView>.weakObjects()
 
     var isEnabled: Bool {
@@ -96,11 +96,11 @@ final class AdBlockManager {
         let controller = webView.configuration.userContentController
         controller.removeAllContentRuleLists()
 
-        guard isEnabled, let compiledRuleList = compiledRuleList else {
-            return
-        }
+        guard isEnabled else { return }
 
-        controller.add(compiledRuleList)
+        for list in compiledRuleLists.values {
+            controller.add(list)
+        }
     }
 
     private func applyRulesToAttachedWebViews() {
@@ -110,21 +110,37 @@ final class AdBlockManager {
     }
 
     private func loadCompiledRules() {
-        WKContentRuleListStore.default().lookUpContentRuleList(forIdentifier: ruleListIdentifier) { [weak self] ruleList, _ in
-            DispatchQueue.main.async {
-                if let ruleList = ruleList {
-                    self?.compiledRuleList = ruleList
-                    self?.applyRulesToAttachedWebViews()
-                } else {
-                    self?.recompileRules()
-                }
+        let group = DispatchGroup()
+        
+        group.enter()
+        WKContentRuleListStore.default().lookUpContentRuleList(forIdentifier: "SimpleBrowser_Custom") { [weak self] list, _ in
+            if let list = list { self?.compiledRuleLists["custom"] = list }
+            group.leave()
+        }
+        
+        let subs = loadSubscriptions().filter { $0.isEnabled }
+        for sub in subs {
+            group.enter()
+            WKContentRuleListStore.default().lookUpContentRuleList(forIdentifier: "SimpleBrowser_Sub_\(sub.id)") { [weak self] list, _ in
+                if let list = list { self?.compiledRuleLists[sub.id] = list }
+                group.leave()
+            }
+        }
+        
+        group.notify(queue: .main) { [weak self] in
+            if self?.compiledRuleLists.isEmpty == true {
+                self?.recompileRules()
+            } else {
+                self?.applyRulesToAttachedWebViews()
             }
         }
     }
 
     func applyRulesToConfiguration(_ configuration: WKWebViewConfiguration) {
-        guard isEnabled, let ruleList = compiledRuleList else { return }
-        configuration.userContentController.add(ruleList)
+        guard isEnabled else { return }
+        for list in compiledRuleLists.values {
+            configuration.userContentController.add(list)
+        }
     }
 
     func fetchSubscription(_ sub: AdBlockSubscription, completion: @escaping (Bool, Int) -> Void) {
@@ -164,18 +180,45 @@ final class AdBlockManager {
     }
 
     func recompileRules(completion: ((Bool) -> Void)? = nil) {
-        let jsonString = generateWebKitRulesJSON()
+        let group = DispatchGroup()
+        var successCount = 0
 
-        WKContentRuleListStore.default().compileContentRuleList(forIdentifier: ruleListIdentifier, encodedContentRuleList: jsonString) { [weak self] ruleList, error in
-            DispatchQueue.main.async {
-                if let ruleList = ruleList {
-                    self?.compiledRuleList = ruleList
-                    self?.applyRulesToAttachedWebViews()
-                    completion?(true)
-                } else {
-                    completion?(false)
-                }
+        // 1. 独立编译自定义规则
+        group.enter()
+        let customJson = generateJSON(from: getCustomRules(), limit: 2000)
+        WKContentRuleListStore.default().compileContentRuleList(forIdentifier: "SimpleBrowser_Custom", encodedContentRuleList: customJson) { [weak self] list, error in
+            if let list = list {
+                self?.compiledRuleLists["custom"] = list
+                successCount += 1
+            } else {
+                self?.compiledRuleLists.removeValue(forKey: "custom")
             }
+            group.leave()
+        }
+
+        // 2. 独立编译各个订阅规则
+        let subs = loadSubscriptions().filter { $0.isEnabled }
+        for sub in subs {
+            group.enter()
+            let fileURL = getSubscriptionFileURL(id: sub.id)
+            let text = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
+            // 限制订阅解析行数，防止 4K 视频等高负载场景下内存溢出崩溃
+            let subJson = generateJSON(from: text, limit: 8000)
+
+            WKContentRuleListStore.default().compileContentRuleList(forIdentifier: "SimpleBrowser_Sub_\(sub.id)", encodedContentRuleList: subJson) { [weak self] list, error in
+                if let list = list {
+                    self?.compiledRuleLists[sub.id] = list
+                    successCount += 1
+                } else {
+                    self?.compiledRuleLists.removeValue(forKey: sub.id)
+                }
+                group.leave()
+            }
+        }
+
+        group.notify(queue: .main) { [weak self] in
+            self?.applyRulesToAttachedWebViews()
+            completion?(successCount > 0)
         }
     }
 
@@ -184,25 +227,17 @@ final class AdBlockManager {
         return dir.appendingPathComponent("adblock_sub_\(id).txt")
     }
 
-    private func generateWebKitRulesJSON() -> String {
+    private func generateJSON(from text: String, limit: Int) -> String {
         var rulesArray: [[String: Any]] = []
-
-        let rawCustom = getCustomRules()
-        let customLines = rawCustom.components(separatedBy: .newlines)
-        for line in customLines {
+        let lines = text.components(separatedBy: .newlines)
+        
+        var processedCount = 0
+        for line in lines {
+            if processedCount >= limit { break }
             let parsed = parseABPLine(line)
-            rulesArray.append(contentsOf: parsed)
-        }
-
-        let subs = loadSubscriptions().filter { $0.isEnabled }
-        for sub in subs {
-            let fileURL = getSubscriptionFileURL(id: sub.id)
-            if let text = try? String(contentsOf: fileURL, encoding: .utf8) {
-                let lines = text.components(separatedBy: .newlines)
-                for line in lines {
-                    let parsed = parseABPLine(line)
-                    rulesArray.append(contentsOf: parsed)
-                }
+            if !parsed.isEmpty {
+                rulesArray.append(contentsOf: parsed)
+                processedCount += 1
             }
         }
 
@@ -217,7 +252,6 @@ final class AdBlockManager {
            let json = String(data: data, encoding: .utf8) {
             return json
         }
-
         return "[]"
     }
 
@@ -251,8 +285,15 @@ final class AdBlockManager {
             let selectorItems = fullSelector.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             for sel in selectorItems {
                 if sel.isEmpty || sel.contains(":has(") || sel.contains(":matches(") || sel.contains(":where(") { continue }
+                
+                // WebKit 不支持 CSS 属性选择器中的 i (忽略大小写) 标志，必须安全剥离，否则整套规则编译崩溃
+                var cleanSel = sel
+                if cleanSel.hasSuffix(" i]") { cleanSel = String(cleanSel.dropLast(3)) + "]" }
+                else if cleanSel.hasSuffix(" I]") { cleanSel = String(cleanSel.dropLast(3)) + "]" }
+                cleanSel = cleanSel.replacingOccurrences(of: "\" i]", with: "\"]").replacingOccurrences(of: "' i]", with: "']")
 
                 var trigger: [String: Any] = ["url-filter": ".*"]
+                // WebKit 规定 if-domain 和 unless-domain 互斥
                 if !ifDomains.isEmpty {
                     trigger["if-domain"] = ifDomains
                 } else if !unlessDomains.isEmpty {
@@ -261,7 +302,7 @@ final class AdBlockManager {
 
                 let action: [String: Any] = [
                     "type": "css-display-none",
-                    "selector": sel
+                    "selector": cleanSel
                 ]
                 results.append(["trigger": trigger, "action": action])
             }
