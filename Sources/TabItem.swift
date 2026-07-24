@@ -543,10 +543,11 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
             return true
         }
 
+        if nsError.domain == "WebKitErrorDomain" && nsError.code == 102 {
+            return true
+        }
+
         if nsError.domain == WKError.errorDomain {
-            if nsError.code == WKError.Code.frameLoadInterruptedByPolicyChange.rawValue {
-                return true
-            }
             if nsError.code == WKError.Code.webContentProcessTerminated.rawValue {
                 return true
             }
