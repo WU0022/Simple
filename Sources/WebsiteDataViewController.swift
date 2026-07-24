@@ -193,7 +193,7 @@ final class DomainSettingsViewController: UITableViewController {
 final class UserAgentManagerViewController: UITableViewController {
     private var items: [UserAgentItem] = []
     private var selectedId: String = ""
-    var onUASelected: ((String) -> Void)?
+    var onUASelected: ((UserAgentItem) -> Void)?
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -263,8 +263,8 @@ final class UserAgentManagerViewController: UITableViewController {
                 UserAgentStore.shared.addCustomItem(name: name, uaString: ua)
             }
             self?.loadData()
-            let currentUA = UserAgentStore.shared.getSelectedUA()
-            self?.onUASelected?(currentUA)
+            let currentItem = UserAgentStore.shared.getSelectedItem()
+            self?.onUASelected?(currentItem)
         })
         alert.addAction(UIAlertAction(title: "取消", style: .cancel))
         present(alert, animated: true)
@@ -293,7 +293,7 @@ final class UserAgentManagerViewController: UITableViewController {
         UserAgentStore.shared.setSelectedId(item.id)
         tableView.reloadData()
 
-        onUASelected?(item.uaString)
+        onUASelected?(item)
         dismiss(animated: true)
     }
 
@@ -310,8 +310,8 @@ final class UserAgentManagerViewController: UITableViewController {
             let deleteAction = UIContextualAction(style: .normal, title: "删除") { [weak self] _, _, completion in
                 UserAgentStore.shared.deleteCustomItem(id: item.id)
                 self?.loadData()
-                let currentUA = UserAgentStore.shared.getSelectedUA()
-                self?.onUASelected?(currentUA)
+                let currentItem = UserAgentStore.shared.getSelectedItem()
+                self?.onUASelected?(currentItem)
                 completion(true)
             }
             deleteAction.backgroundColor = .systemRed
