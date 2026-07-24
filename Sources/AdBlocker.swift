@@ -18,10 +18,9 @@ final class AdBlockManager {
     private let enabledKey = "adblock_enabled_v2"
     private let subscriptionsKey = "adblock_subscriptions_v2"
     private let customRulesKey = "adblock_custom_rules_v2"
-    private let metadataKey = "adblock_compiled_metadata_v8"
-    private let identifierPrefix = "SimpleBrowserAdBlockV8"
+    private let metadataKey = "adblock_compiled_metadata_v9"
+    private let identifierPrefix = "SimpleBrowserAdBlockV9"
     private let nativeRuleChunkSize = 5000
-    private let maximumCosmeticRulesPerSource = 100000
     private let cosmeticScriptPayloadLimit = 180000
     private let maximumCompilationDuration: TimeInterval = 180
     private let maximumSingleChunkDuration: TimeInterval = 45
@@ -481,7 +480,7 @@ final class AdBlockManager {
         ) { [weak self] lists, identifiers, skippedChunks in
             guard let self = self else { return }
 
-            guard !lists.isEmpty else {
+            if lists.isEmpty && payload.cosmeticRules.isEmpty {
                 self.updatingSourceIds.remove(sourceId)
                 self.setUpdateStatus(sourceId: sourceId, status: nil)
                 DispatchQueue.main.async {
@@ -829,12 +828,8 @@ final class AdBlockManager {
 
                 if !result.cosmeticRules.isEmpty {
                     for cosmeticRule in result.cosmeticRules {
-                        if cosmeticRules.count < self.maximumCosmeticRulesPerSource {
-                            cosmeticRules.append(cosmeticRule)
-                            ruleCount += 1
-                        } else {
-                            skippedRuleCount += 1
-                        }
+                        ruleCount += 1
+                        cosmeticRules.append(cosmeticRule)
                     }
                 }
 
@@ -978,7 +973,6 @@ final class AdBlockManager {
 
         guard !filter.isEmpty,
               filter.count < 256,
-              !filter.contains(".*.*.*.*"),
               (try? NSRegularExpression(pattern: filter)) != nil else {
             return AdBlockParsedLine(
                 networkRule: nil,
@@ -1129,32 +1123,26 @@ final class AdBlockManager {
     }
 
     private func urlFilterPattern(from pattern: String) -> String {
-        var p = pattern
-        var prefix = ""
-        var suffix = ""
-
-        if p.hasPrefix("||") {
-            p = String(p.dropFirst(2))
-            prefix = "^https?://([^/]+\\.)?"
-        } else if p.hasPrefix("|") {
-            p = String(p.dropFirst(1))
-            prefix = "^"
+        var regexPattern = ""
+        if pattern.hasPrefix("||") {
+            let domainOnly = String(pattern.dropFirst(2)).replacingOccurrences(of: "^", with: "")
+            let cleanDomain = domainOnly.trimmingCharacters(in: .whitespacesAndNewlines)
+            let escapedDomain = NSRegularExpression.escapedPattern(for: cleanDomain)
+            regexPattern = ".*" + escapedDomain + ".*"
+        } else {
+            var p = pattern.trimmingCharacters(in: .whitespacesAndNewlines)
+            p = p.replacingOccurrences(of: " ", with: "")
+            p = NSRegularExpression.escapedPattern(for: p)
+            p = p.replacingOccurrences(of: "\\*", with: ".*")
+            p = p.replacingOccurrences(of: "\\^", with: ".*")
+            regexPattern = ".*" + p + ".*"
         }
 
-        if p.hasSuffix("|") {
-            p = String(p.dropLast(1))
-            suffix = "$"
+        while regexPattern.contains(".*.*") {
+            regexPattern = regexPattern.replacingOccurrences(of: ".*.*", with: ".*")
         }
 
-        var escaped = NSRegularExpression.escapedPattern(for: p)
-        escaped = escaped.replacingOccurrences(of: "\\*", with: ".*")
-        escaped = escaped.replacingOccurrences(of: "\\^", with: "([^a-zA-Z0-9_\\-.%]|$)")
-
-        while escaped.contains(".*.*") {
-            escaped = escaped.replacingOccurrences(of: ".*.*", with: ".*")
-        }
-
-        return prefix + escaped + suffix
+        return regexPattern
     }
 
     private func jsonString(from rules: [[String: Any]]) -> String? {
