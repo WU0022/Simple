@@ -173,46 +173,7 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         }
     }
 
-    private func applyDesktopViewAdaptationIfNeeded() {
-        let isDesktop = UserAgentStore.shared.getSelectedId() == "default_mac"
-        guard isDesktop else { return }
-
-        let js = """
-        (function() {
-            try {
-                var meta = document.querySelector('meta[name="viewport"]');
-                if (!meta) {
-                    meta = document.createElement('meta');
-                    meta.name = 'viewport';
-                    (document.head || document.documentElement).appendChild(meta);
-                }
-                var screenW = window.screen.width || 390;
-                var targetW = 1024;
-                var scale = (screenW / targetW).toFixed(2);
-                meta.content = 'width=' + targetW + ', initial-scale=' + scale + ', minimum-scale=0.1, maximum-scale=5.0, user-scalable=yes';
-
-                var styleId = '__desktop_overflow_fix__';
-                if (!document.getElementById(styleId)) {
-                    var style = document.createElement('style');
-                    style.id = styleId;
-                    style.type = 'text/css';
-                    style.innerHTML = `
-                        html { overflow-x: auto !important; }
-                        body { max-width: 100% !important; overflow-x: auto !important; }
-                        video, iframe, object, embed { max-width: 100% !important; }
-                        .player-container, #player, .video-player, .html5-video-player { max-width: 100% !important; }
-                    `;
-                    (document.head || document.documentElement).appendChild(style);
-                }
-            } catch(e) {}
-        })();
-        """
-        webView.evaluateJavaScript(js, completionHandler: nil)
-    }
-
     func injectAndRunUserScripts() {
-        applyDesktopViewAdaptationIfNeeded()
-
         let currentUrlStr = url?.absoluteString ?? ""
         let matchingScripts = UserScriptStore.shared.loadScripts().filter {
             UserScriptStore.shared.isScriptMatching(script: $0, urlString: currentUrlStr)
@@ -418,7 +379,6 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
             url = currentURL
             title = webView.title ?? url?.host ?? "新标签页"
         }
-        applyDesktopViewAdaptationIfNeeded()
         if !hasInjectedScriptsForCurrentPage {
             hasInjectedScriptsForCurrentPage = true
             injectAndRunUserScripts()
@@ -432,7 +392,6 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
             url = webView.url
             title = webView.title ?? url?.host ?? "新标签页"
         }
-        applyDesktopViewAdaptationIfNeeded()
         if !hasInjectedScriptsForCurrentPage {
             hasInjectedScriptsForCurrentPage = true
             injectAndRunUserScripts()
