@@ -177,19 +177,11 @@ final class AdBlockManager {
     }
 
     func recompileRules(completion: ((Bool) -> Void)? = nil) {
-        let (jsonString, rawCSS, totalRules) = generateWebKitRulesAndCSS()
+        let (jsonString, jsScriptString, totalRules) = generateWebKitRulesAndJSScript()
         self.compiledCount = totalRules
 
-        if !rawCSS.isEmpty {
-            let jsContent = """
-            (function() {
-                var style = document.createElement('style');
-                style.type = 'text/css';
-                style.innerHTML = `\(rawCSS)`;
-                (document.head || document.documentElement || document).appendChild(style);
-            })();
-            """
-            self.injectedCSSUserScript = WKUserScript(source: jsContent, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+        if !jsScriptString.isEmpty {
+            self.injectedCSSUserScript = WKUserScript(source: jsScriptString, injectionTime: .atDocumentStart, forMainFrameOnly: false)
         } else {
             self.injectedCSSUserScript = nil
         }
@@ -215,19 +207,26 @@ final class AdBlockManager {
         return dir.appendingPathComponent("adblock_sub_\(id).txt")
     }
 
-    private func generateWebKitRulesAndCSS() -> (String, String, Int) {
+    private func generateWebKitRulesAndJSScript() -> (String, String, Int) {
         var jsonRules: [[String: Any]] = []
-        var cssBlocks: [String] = []
+        var domainCSSTable: [String: Set<String>] = [:]
         var totalRuleCount = 0
 
         let processLine: (String) -> Void = { [weak self] line in
             guard let self = self else { return }
-            let (rules, css) = self.parseABPLine(line)
+            let (rules, domCSSDict) = self.parseABPLine(line)
             jsonRules.append(contentsOf: rules)
-            if let cssStr = css, !cssStr.isEmpty {
-                cssBlocks.append(cssStr)
+
+            if let dict = domCSSDict {
+                for (dom, selectors) in dict {
+                    if domainCSSTable[dom] == nil {
+                        domainCSSTable[dom] = Set<String>()
+                    }
+                    domainCSSTable[dom]?.formUnion(selectors)
+                }
             }
-            if !rules.isEmpty || (css != nil && !css!.isEmpty) {
+
+            if !rules.isEmpty || (domCSSDict != nil && !domCSSDict!.isEmpty) {
                 totalRuleCount += 1
             }
         }
@@ -264,11 +263,70 @@ final class AdBlockManager {
             jsonString = "[]"
         }
 
-        let combinedCSS = cssBlocks.joined(separator: "\n")
-        return (jsonString, combinedCSS, totalRuleCount)
+        let jsString = generateDOMHidingUserScript(from: domainCSSTable)
+        return (jsonString, jsString, totalRuleCount)
     }
 
-    private func parseABPLine(_ rawLine: String) -> ([[String: Any]], String?) {
+    private func generateDOMHidingUserScript(from table: [String: Set<String>]) -> String {
+        guard !table.isEmpty else { return "" }
+
+        var rulesJSONArray: [[String: Any]] = []
+        for (domain, selectors) in table {
+            let cssCombined = selectors.joined(separator: ", ")
+            let domainsArray = domain == "*" ? [] : domain.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            rulesJSONArray.append([
+                "domains": domainsArray,
+                "css": cssCombined
+            ])
+        }
+
+        guard let rulesData = try? JSONSerialization.data(withJSONObject: rulesJSONArray, options: []),
+              let rulesJSONText = String(data: rulesData, encoding: .utf8) else {
+            return ""
+        }
+
+        return """
+        (function() {
+            var host = (location.hostname || '').toLowerCase();
+            var rules = \(rulesJSONText);
+
+            function apply() {
+                var matched = [];
+                for (var i = 0; i < rules.length; i++) {
+                    var item = rules[i];
+                    if (!item.domains || item.domains.length === 0) {
+                        matched.push(item.css);
+                        continue;
+                    }
+                    for (var j = 0; j < item.domains.length; j++) {
+                        var d = item.domains[j];
+                        if (host === d || host.endsWith('.' + d)) {
+                            matched.push(item.css);
+                            break;
+                        }
+                    }
+                }
+                if (matched.length === 0) return;
+                var fullCSS = matched.join(', ') + ' { display: none !important; visibility: hidden !important; opacity: 0 !important; pointer-events: none !important; }';
+                var style = document.getElementById('__adblock_injected_css__');
+                if (!style) {
+                    style = document.createElement('style');
+                    style.id = '__adblock_injected_css__';
+                    style.type = 'text/css';
+                    (document.head || document.documentElement || document).appendChild(style);
+                }
+                style.textContent = fullCSS;
+            }
+
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', apply);
+            }
+            apply();
+        })();
+        """
+    }
+
+    private func parseABPLine(_ rawLine: String) -> ([[String: Any]], [String: Set<String>]?) {
         var jsonRules: [[String: Any]] = []
         var line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !line.isEmpty else { return ([], nil) }
@@ -281,6 +339,9 @@ final class AdBlockManager {
 
             var ifDomains: [String] = []
             var unlessDomains: [String] = []
+
+            let targetDomainKey = domainStr.isEmpty ? "*" : domainStr.lowercased()
+            var domCSSDict: [String: Set<String>] = [targetDomainKey: Set([fullSelector])]
 
             if !domainStr.isEmpty {
                 let domains = domainStr.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -297,13 +358,10 @@ final class AdBlockManager {
 
             let selectorItems = splitSelectorList(fullSelector)
             var standardSelectors: [String] = []
-            var complexSelectors: [String] = []
 
             for sel in selectorItems {
                 if sel.isEmpty { continue }
-                if sel.contains(":has(") || sel.contains(":matches(") || sel.contains(":where(") || sel.contains(":xpath(") {
-                    complexSelectors.append(sel)
-                } else {
+                if !sel.contains(":has(") && !sel.contains(":matches(") && !sel.contains(":where(") && !sel.contains(":xpath(") {
                     standardSelectors.append(sel)
                 }
             }
@@ -323,18 +381,7 @@ final class AdBlockManager {
                 jsonRules.append(["trigger": trigger, "action": action])
             }
 
-            var cssString: String? = nil
-            if !complexSelectors.isEmpty {
-                let combinedComplex = complexSelectors.joined(separator: ", ")
-                if !ifDomains.isEmpty {
-                    let prefix = ifDomains.map { $0.hasPrefix(".") ? "[\( $0 )]" : "[\( $0 )]" }.joined(separator: ",")
-                    cssString = "\(domainStr) { \(combinedComplex) { display: none !important; } }"
-                } else {
-                    cssString = "\(combinedComplex) { display: none !important; }"
-                }
-            }
-
-            return (jsonRules, cssString)
+            return (jsonRules, domCSSDict)
         }
 
         var isWhiteList = false
