@@ -23,12 +23,15 @@ final class AdBlockManager {
     private let nativeRuleChunkSize = 5000
     private let maximumCosmeticRulesPerSource = 12000
     private let cosmeticScriptPayloadLimit = 180000
+    private let maximumCompilationDuration: TimeInterval = 180
+    private let maximumSingleChunkDuration: TimeInterval = 45
 
     private var attachedWebViews = NSHashTable<WKWebView>.weakObjects()
     private var compiledListsBySource: [String: [WKContentRuleList]] = [:]
     private var cosmeticScriptsBySource: [String: [WKUserScript]] = [:]
     private var metadataBySource: [String: AdBlockCompiledSourceMetadata] = [:]
     private var updatingSourceIds = Set<String>()
+    private var updateStatusBySource: [String: String] = [:]
     private let parseQueue = DispatchQueue(label: "SimpleBrowser.AdBlockParser", qos: .userInitiated)
 
     var isEnabled: Bool {
@@ -81,8 +84,16 @@ final class AdBlockManager {
         }
 
         UserDefaults.standard.set(rules, forKey: customRulesKey)
+        setUpdateStatus(
+            sourceId: Self.customSourceId,
+            status: "正在解析自定义规则…"
+        )
 
-        compileSource(id: Self.customSourceId) { success, message in
+        compileSource(id: Self.customSourceId) { [weak self] success, message in
+            self?.setUpdateStatus(
+                sourceId: Self.customSourceId,
+                status: nil
+            )
             completion?(success, message)
         }
     }
@@ -129,6 +140,21 @@ final class AdBlockManager {
 
     func ruleCount(sourceId: String) -> Int {
         metadataBySource[sourceId]?.ruleCount ?? 0
+    }
+
+    func updateStatus(sourceId: String) -> String? {
+        updateStatusBySource[sourceId]
+    }
+
+    private func setUpdateStatus(
+        sourceId: String,
+        status: String?
+    ) {
+        if let status = status {
+            updateStatusBySource[sourceId] = status
+        } else {
+            updateStatusBySource.removeValue(forKey: sourceId)
+        }
     }
 
     func attach(to webView: WKWebView) {
@@ -186,6 +212,10 @@ final class AdBlockManager {
         }
 
         updatingSourceIds.insert(subscription.id)
+        setUpdateStatus(
+            sourceId: subscription.id,
+            status: "正在下载订阅…"
+        )
 
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 120
@@ -211,6 +241,10 @@ final class AdBlockManager {
             if let error = error {
                 DispatchQueue.main.async {
                     self.updatingSourceIds.remove(subscription.id)
+                    self.setUpdateStatus(
+                        sourceId: subscription.id,
+                        status: nil
+                    )
                     completion(false, 0, error.localizedDescription)
                 }
                 return
@@ -219,6 +253,10 @@ final class AdBlockManager {
             guard let httpResponse = response as? HTTPURLResponse else {
                 DispatchQueue.main.async {
                     self.updatingSourceIds.remove(subscription.id)
+                    self.setUpdateStatus(
+                        sourceId: subscription.id,
+                        status: nil
+                    )
                     completion(false, 0, "服务器未返回 HTTP 响应")
                 }
                 return
@@ -227,6 +265,10 @@ final class AdBlockManager {
             guard (200...299).contains(httpResponse.statusCode) else {
                 DispatchQueue.main.async {
                     self.updatingSourceIds.remove(subscription.id)
+                    self.setUpdateStatus(
+                        sourceId: subscription.id,
+                        status: nil
+                    )
                     completion(false, 0, "服务器返回 HTTP \(httpResponse.statusCode)")
                 }
                 return
@@ -235,6 +277,10 @@ final class AdBlockManager {
             guard let data = data, !data.isEmpty else {
                 DispatchQueue.main.async {
                     self.updatingSourceIds.remove(subscription.id)
+                    self.setUpdateStatus(
+                        sourceId: subscription.id,
+                        status: nil
+                    )
                     completion(false, 0, "订阅内容为空")
                 }
                 return
@@ -245,6 +291,10 @@ final class AdBlockManager {
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 DispatchQueue.main.async {
                     self.updatingSourceIds.remove(subscription.id)
+                    self.setUpdateStatus(
+                        sourceId: subscription.id,
+                        status: nil
+                    )
                     completion(false, 0, "订阅内容不是有效文本")
                 }
                 return
@@ -259,14 +309,27 @@ final class AdBlockManager {
             } catch {
                 DispatchQueue.main.async {
                     self.updatingSourceIds.remove(subscription.id)
+                    self.setUpdateStatus(
+                        sourceId: subscription.id,
+                        status: nil
+                    )
                     completion(false, 0, "订阅文件保存失败：\(error.localizedDescription)")
                 }
                 return
             }
 
+            self.setUpdateStatus(
+                sourceId: subscription.id,
+                status: "正在解析规则…"
+            )
+
             self.compileSource(id: subscription.id, isAlreadyUpdating: true) { success, message in
                 DispatchQueue.main.async {
                     self.updatingSourceIds.remove(subscription.id)
+                    self.setUpdateStatus(
+                        sourceId: subscription.id,
+                        status: nil
+                    )
 
                     let count = self.ruleCount(sourceId: subscription.id)
 
@@ -348,6 +411,13 @@ final class AdBlockManager {
 
         updatingSourceIds.insert(sourceId)
 
+        if updateStatusBySource[sourceId] == nil {
+            setUpdateStatus(
+                sourceId: sourceId,
+                status: "正在解析规则…"
+            )
+        }
+
         parseQueue.async { [weak self] in
             guard let self = self else {
                 return
@@ -356,6 +426,11 @@ final class AdBlockManager {
             let payload = self.buildSourcePayload(text: text)
 
             DispatchQueue.main.async {
+                self.setUpdateStatus(
+                    sourceId: sourceId,
+                    status: "正在编译规则…"
+                )
+
                 self.compilePayload(
                     payload,
                     sourceId: sourceId,
@@ -387,6 +462,10 @@ final class AdBlockManager {
             compiledListsBySource.removeValue(forKey: sourceId)
             restoreCosmeticScripts(metadata: metadata)
             updatingSourceIds.remove(sourceId)
+            setUpdateStatus(
+                sourceId: sourceId,
+                status: nil
+            )
             applyRulesToAttachedWebViews()
 
             let message = payload.skippedRuleCount > 0
@@ -397,6 +476,10 @@ final class AdBlockManager {
             return
         }
 
+        let deadline = Date().addingTimeInterval(
+            maximumCompilationDuration
+        )
+
         compileChunks(
             payload.networkChunks,
             sourceId: sourceId,
@@ -404,7 +487,8 @@ final class AdBlockManager {
             index: 0,
             lists: [],
             identifiers: [],
-            skippedChunks: 0
+            skippedChunks: 0,
+            deadline: deadline
         ) { [weak self] lists, identifiers, skippedChunks in
             guard let self = self else {
                 return
@@ -412,7 +496,11 @@ final class AdBlockManager {
 
             guard !lists.isEmpty else {
                 self.updatingSourceIds.remove(sourceId)
-                completion?(false, "所有网络规则块均无法编译")
+                self.setUpdateStatus(
+                    sourceId: sourceId,
+                    status: nil
+                )
+                completion?(false, "规则编译超时或所有规则块均不兼容")
                 return
             }
 
@@ -430,6 +518,10 @@ final class AdBlockManager {
             self.compiledListsBySource[sourceId] = lists
             self.restoreCosmeticScripts(metadata: metadata)
             self.updatingSourceIds.remove(sourceId)
+            self.setUpdateStatus(
+                sourceId: sourceId,
+                status: nil
+            )
             self.applyRulesToAttachedWebViews()
 
             let skipped = metadata.skippedRuleCount
@@ -449,6 +541,7 @@ final class AdBlockManager {
         lists: [WKContentRuleList],
         identifiers: [String],
         skippedChunks: Int,
+        deadline: Date,
         completion: @escaping ([WKContentRuleList], [String], Int) -> Void
     ) {
         guard index < chunks.count else {
@@ -456,37 +549,71 @@ final class AdBlockManager {
             return
         }
 
+        guard Date() < deadline else {
+            completion(
+                lists,
+                identifiers,
+                skippedChunks + chunks.count - index
+            )
+            return
+        }
+
+        setUpdateStatus(
+            sourceId: sourceId,
+            status: "正在编译规则 \(index + 1)/\(chunks.count)…"
+        )
+
         let identifier = "\(identifierPrefix).\(sourceId.replacingOccurrences(of: "-", with: "")).\(version).\(index)"
+        let gate = AdBlockChunkCompilationGate()
+
+        func finish(_ ruleList: WKContentRuleList?) {
+            gate.resolve {
+                DispatchQueue.main.async {
+                    var nextLists = lists
+                    var nextIdentifiers = identifiers
+                    var nextSkippedChunks = skippedChunks
+
+                    if let ruleList = ruleList {
+                        nextLists.append(ruleList)
+                        nextIdentifiers.append(identifier)
+                    } else {
+                        nextSkippedChunks += 1
+                    }
+
+                    self.compileChunks(
+                        chunks,
+                        sourceId: sourceId,
+                        version: version,
+                        index: index + 1,
+                        lists: nextLists,
+                        identifiers: nextIdentifiers,
+                        skippedChunks: nextSkippedChunks,
+                        deadline: deadline,
+                        completion: completion
+                    )
+                }
+            }
+        }
 
         WKContentRuleListStore.default().compileContentRuleList(
             forIdentifier: identifier,
             encodedContentRuleList: chunks[index]
-        ) { [weak self] ruleList, _ in
-            guard let self = self else {
-                return
-            }
+        ) { ruleList, _ in
+            finish(ruleList)
+        }
 
-            var nextLists = lists
-            var nextIdentifiers = identifiers
-            var nextSkippedChunks = skippedChunks
-
-            if let ruleList = ruleList {
-                nextLists.append(ruleList)
-                nextIdentifiers.append(identifier)
-            } else {
-                nextSkippedChunks += 1
-            }
-
-            self.compileChunks(
-                chunks,
-                sourceId: sourceId,
-                version: version,
-                index: index + 1,
-                lists: nextLists,
-                identifiers: nextIdentifiers,
-                skippedChunks: nextSkippedChunks,
-                completion: completion
+        let remainingTime = max(
+            1,
+            min(
+                maximumSingleChunkDuration,
+                deadline.timeIntervalSinceNow
             )
+        )
+
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + remainingTime
+        ) {
+            finish(nil)
         }
     }
 
@@ -495,6 +622,10 @@ final class AdBlockManager {
         compiledListsBySource.removeValue(forKey: sourceId)
         cosmeticScriptsBySource.removeValue(forKey: sourceId)
         updatingSourceIds.remove(sourceId)
+        setUpdateStatus(
+            sourceId: sourceId,
+            status: nil
+        )
         saveMetadata(metadataBySource)
         applyRulesToAttachedWebViews()
     }
@@ -1140,6 +1271,25 @@ private struct AdBlockParsedLine {
     var isUnsupported: Bool
 }
 
+private final class AdBlockChunkCompilationGate {
+    private let lock = NSLock()
+    private var resolved = false
+
+    func resolve(_ handler: () -> Void) {
+        lock.lock()
+
+        guard !resolved else {
+            lock.unlock()
+            return
+        }
+
+        resolved = true
+        lock.unlock()
+
+        handler()
+    }
+}
+
 struct AdBlockCosmeticRule: Codable {
     var domains: [String]
     var selector: String
@@ -1148,6 +1298,7 @@ struct AdBlockCosmeticRule: Codable {
 final class AdBlockManagerViewController: UIViewController, UITableViewDataSource, UITableViewDelegate {
     private var subscriptions: [AdBlockSubscription] = []
     private let tableView = UITableView(frame: .zero, style: .insetGrouped)
+    private var statusRefreshTimer: Timer?
 
     var onRulesChanged: (() -> Void)?
 
@@ -1160,6 +1311,17 @@ final class AdBlockManagerViewController: UIViewController, UITableViewDataSourc
 
         setupInterface()
         loadData()
+
+        statusRefreshTimer = Timer.scheduledTimer(
+            withTimeInterval: 0.8,
+            repeats: true
+        ) { [weak self] _ in
+            self?.tableView.reloadData()
+        }
+    }
+
+    deinit {
+        statusRefreshTimer?.invalidate()
     }
 
     private func setupInterface() {
@@ -1224,7 +1386,9 @@ final class AdBlockManagerViewController: UIViewController, UITableViewDataSourc
                 cell.textLabel?.text = subscription.name
 
                 if AdBlockManager.shared.isUpdating(sourceId: subscription.id) {
-                    cell.detailTextLabel?.text = "更新中…"
+                    cell.detailTextLabel?.text = AdBlockManager.shared.updateStatus(
+                        sourceId: subscription.id
+                    ) ?? "更新中…"
                     cell.accessoryType = .none
                 } else if let date = subscription.lastUpdated {
                     let formatter = DateFormatter()
@@ -1251,7 +1415,9 @@ final class AdBlockManagerViewController: UIViewController, UITableViewDataSourc
         cell.textLabel?.text = "编辑自定义过滤规则"
 
         if AdBlockManager.shared.isUpdating(sourceId: sourceId) {
-            cell.detailTextLabel?.text = "自定义规则更新中…"
+            cell.detailTextLabel?.text = AdBlockManager.shared.updateStatus(
+                sourceId: sourceId
+            ) ?? "自定义规则更新中…"
         } else {
             cell.detailTextLabel?.text = "自定义规则：\(count) 条"
         }
