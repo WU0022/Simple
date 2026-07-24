@@ -18,10 +18,10 @@ final class AdBlockManager {
     private let enabledKey = "adblock_enabled_v2"
     private let subscriptionsKey = "adblock_subscriptions_v2"
     private let customRulesKey = "adblock_custom_rules_v2"
-    private let metadataKey = "adblock_compiled_metadata_v7"
-    private let identifierPrefix = "SimpleBrowserAdBlockV7"
+    private let metadataKey = "adblock_compiled_metadata_v8"
+    private let identifierPrefix = "SimpleBrowserAdBlockV8"
     private let nativeRuleChunkSize = 5000
-    private let maximumCosmeticRulesPerSource = 15000
+    private let cosmeticScriptPayloadLimit = 180000
     private let maximumCompilationDuration: TimeInterval = 180
     private let maximumSingleChunkDuration: TimeInterval = 45
 
@@ -659,7 +659,6 @@ final class AdBlockManager {
             let source = """
             (function() {
                 var rules = \(json);
-                var fallbackRules = [];
                 var styleId = '__simple_browser_adblock_style__';
                 var host = (location.hostname || '').toLowerCase();
 
@@ -667,101 +666,17 @@ final class AdBlockManager {
                     if (!rule.domains || rule.domains.length === 0) {
                         return true;
                     }
-
                     for (var i = 0; i < rule.domains.length; i++) {
                         var domain = rule.domains[i];
-
                         if (host === domain || host.endsWith('.' + domain)) {
                             return true;
                         }
                     }
-
                     return false;
-                }
-
-                function hideElement(element) {
-                    if (!element) {
-                        return;
-                    }
-
-                    element.style.setProperty('display', 'none', 'important');
-                    element.style.setProperty('visibility', 'hidden', 'important');
-                    element.style.setProperty('pointer-events', 'none', 'important');
-                }
-
-                function hideBySelector(selector) {
-                    try {
-                        var elements = document.querySelectorAll(selector);
-
-                        for (var i = 0; i < elements.length; i++) {
-                            hideElement(elements[i]);
-                        }
-
-                        return true;
-                    } catch (_) {
-                        return false;
-                    }
-                }
-
-                function hideByHasFallback(selector) {
-                    var hasIndex = selector.indexOf(':has(');
-
-                    if (hasIndex < 0 || !selector.endsWith(')')) {
-                        return;
-                    }
-
-                    var outerSelector = selector.substring(0, hasIndex).trim() || '*';
-                    var innerSelector = selector.substring(hasIndex + 5, selector.length - 1).trim();
-
-                    if (!innerSelector) {
-                        return;
-                    }
-
-                    var outerElements;
-
-                    try {
-                        outerElements = document.querySelectorAll(outerSelector);
-                    } catch (_) {
-                        return;
-                    }
-
-                    for (var i = 0; i < outerElements.length; i++) {
-                        var outerElement = outerElements[i];
-                        var matched = false;
-
-                        try {
-                            if (innerSelector.startsWith('>')) {
-                                matched = outerElement.querySelector(':scope ' + innerSelector) !== null;
-                            } else {
-                                matched = outerElement.querySelector(innerSelector) !== null;
-                            }
-                        } catch (_) {
-                            matched = false;
-                        }
-
-                        if (matched) {
-                            hideElement(outerElement);
-                        }
-                    }
-                }
-
-                function applyFallbackRules() {
-                    for (var i = 0; i < fallbackRules.length; i++) {
-                        var rule = fallbackRules[i];
-
-                        if (!matchesDomain(rule)) {
-                            continue;
-                        }
-
-                        if (!hideBySelector(rule.selector)) {
-                            hideByHasFallback(rule.selector);
-                        }
-                    }
                 }
 
                 function insertRules() {
                     var style = document.getElementById(styleId);
-
                     if (!style) {
                         style = document.createElement('style');
                         style.id = styleId;
@@ -770,14 +685,12 @@ final class AdBlockManager {
                     }
 
                     var sheet = style.sheet;
-
                     if (!sheet) {
                         return;
                     }
 
                     for (var i = 0; i < rules.length; i++) {
                         var rule = rules[i];
-
                         if (!matchesDomain(rule)) {
                             continue;
                         }
@@ -788,47 +701,14 @@ final class AdBlockManager {
                                 sheet.cssRules.length
                             );
                         } catch (_) {
-                            fallbackRules.push(rule);
                         }
                     }
-
-                    applyFallbackRules();
-                }
-
-                function scheduleFallbackApply() {
-                    var timer = null;
-
-                    var observer = new MutationObserver(function() {
-                        if (timer !== null) {
-                            return;
-                        }
-
-                        timer = setTimeout(function() {
-                            timer = null;
-                            applyFallbackRules();
-                        }, 300);
-                    });
-
-                    observer.observe(document.documentElement, {
-                        childList: true,
-                        subtree: true
-                    });
                 }
 
                 if (document.readyState === 'loading') {
-                    document.addEventListener('DOMContentLoaded', function() {
-                        insertRules();
-
-                        if (fallbackRules.length > 0) {
-                            scheduleFallbackApply();
-                        }
-                    }, { once: true });
+                    document.addEventListener('DOMContentLoaded', insertRules, { once: true });
                 } else {
                     insertRules();
-
-                    if (fallbackRules.length > 0) {
-                        scheduleFallbackApply();
-                    }
                 }
             })();
             """
@@ -891,12 +771,7 @@ final class AdBlockManager {
             if !result.cosmeticRules.isEmpty {
                 for cosmeticRule in result.cosmeticRules {
                     ruleCount += 1
-
-                    if cosmeticRules.count < self.maximumCosmeticRulesPerSource {
-                        cosmeticRules.append(cosmeticRule)
-                    } else {
-                        skippedRuleCount += 1
-                    }
+                    cosmeticRules.append(cosmeticRule)
                 }
             }
 
@@ -932,14 +807,6 @@ final class AdBlockManager {
             )
         }
 
-        if line.contains("#@#") || line.contains("##+js") || line.contains("#%#") {
-            return AdBlockParsedLine(
-                networkRule: nil,
-                cosmeticRules: [],
-                isUnsupported: true
-            )
-        }
-
         if let range = line.range(of: "##") {
             let domainsText = String(line[..<range.lowerBound])
             let selectorsText = String(line[range.upperBound...])
@@ -948,14 +815,14 @@ final class AdBlockManager {
             let domains = normalizedDomains(from: domainsText).include
             let selectors = splitSelectorList(selectorsText)
 
-            let cosmeticRules = selectors.compactMap { selector in
-                parseCosmeticRule(selector: selector, domains: domains)
+            let cosmeticRules = selectors.map { selector in
+                AdBlockCosmeticRule(domains: domains, selector: selector)
             }
 
             return AdBlockParsedLine(
                 networkRule: nil,
                 cosmeticRules: cosmeticRules,
-                isUnsupported: cosmeticRules.count != selectors.count
+                isUnsupported: false
             )
         }
 
@@ -1074,29 +941,6 @@ final class AdBlockManager {
             ],
             cosmeticRules: [],
             isUnsupported: false
-        )
-    }
-
-    private func parseCosmeticRule(
-        selector: String,
-        domains: [String]
-    ) -> AdBlockCosmeticRule? {
-        let value = selector.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !value.isEmpty,
-              value.count <= 4096,
-              !value.contains("\u{0000}"),
-              !value.contains("{"),
-              !value.contains("}"),
-              !value.contains(";"),
-              !value.contains("<"),
-              !value.contains(">style") else {
-            return nil
-        }
-
-        return AdBlockCosmeticRule(
-            domains: domains,
-            selector: value
         )
     }
 
@@ -1314,7 +1158,7 @@ final class AdBlockManagerViewController: UIViewController, UITableViewDataSourc
             withTimeInterval: 0.8,
             repeats: true
         ) { [weak self] _ in
-            self?.tableView.reloadData()
+            self?.refreshVisibleStatus()
         }
     }
 
@@ -1340,6 +1184,44 @@ final class AdBlockManagerViewController: UIViewController, UITableViewDataSourc
     private func loadData() {
         subscriptions = AdBlockManager.shared.loadSubscriptions()
         tableView.reloadData()
+    }
+
+    private func refreshVisibleStatus() {
+        subscriptions = AdBlockManager.shared.loadSubscriptions()
+
+        guard let indexPaths = tableView.indexPathsForVisibleRows else { return }
+
+        for indexPath in indexPaths {
+            guard let cell = tableView.cellForRow(at: indexPath) else { continue }
+
+            if indexPath.section == 1 {
+                if indexPath.row < subscriptions.count {
+                    let subscription = subscriptions[indexPath.row]
+                    if AdBlockManager.shared.isUpdating(sourceId: subscription.id) {
+                        cell.detailTextLabel?.text = AdBlockManager.shared.updateStatus(sourceId: subscription.id) ?? "更新中…"
+                        cell.accessoryType = .none
+                    } else {
+                        if let date = subscription.lastUpdated {
+                            let formatter = DateFormatter()
+                            formatter.dateFormat = "MM-dd HH:mm"
+                            cell.detailTextLabel?.text = "\(subscription.ruleCount) 条 | \(formatter.string(from: date))"
+                        } else {
+                            cell.detailTextLabel?.text = "尚未更新"
+                        }
+                        cell.accessoryType = .disclosureIndicator
+                    }
+                }
+            } else if indexPath.section == 2 {
+                let sourceId = AdBlockManager.customSourceId
+                if AdBlockManager.shared.isUpdating(sourceId: sourceId) {
+                    cell.detailTextLabel?.text = AdBlockManager.shared.updateStatus(sourceId: sourceId) ?? "自定义规则更新中…"
+                } else {
+                    let count = AdBlockManager.shared.ruleCount(sourceId: sourceId)
+                    cell.detailTextLabel?.text = "自定义规则：\(count) 条"
+                }
+            }
+            cell.setNeedsLayout()
+        }
     }
 
     @objc private func handleDone() {
