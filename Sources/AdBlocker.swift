@@ -20,10 +20,10 @@ final class AdBlockManager {
     private let customRulesKey = "adblock_custom_rules_v2"
     private let metadataKey = "adblock_compiled_metadata_v7"
     private let identifierPrefix = "SimpleBrowserAdBlockV7"
-    private let nativeRuleChunkSize = 1500
-    private let maximumNativeRulesPerSource = 150000
-    private let maximumCosmeticRulesPerSource = 150000
-    private let cosmeticScriptPayloadLimit = 180000
+    private let nativeRuleChunkSize = 5000
+    private let maximumCosmeticRulesPerSource = 15000
+    private let maximumCompilationDuration: TimeInterval = 180
+    private let maximumSingleChunkDuration: TimeInterval = 45
 
     private var attachedWebViews = NSHashTable<WKWebView>.weakObjects()
     private var compiledListsBySource: [String: [WKContentRuleList]] = [:]
@@ -154,12 +154,6 @@ final class AdBlockManager {
         } else {
             updateStatusBySource.removeValue(forKey: sourceId)
         }
-        DispatchQueue.main.async {
-            NotificationCenter.default.post(
-                name: NSNotification.Name("AdBlockStatusChanged"),
-                object: nil
-            )
-        }
     }
 
     func attach(to webView: WKWebView) {
@@ -195,8 +189,11 @@ final class AdBlockManager {
     }
 
     private func applyRulesToAttachedWebViews() {
-        for webView in attachedWebViews.allObjects {
-            applyRules(to: webView)
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            for webView in self.attachedWebViews.allObjects {
+                self.applyRules(to: webView)
+            }
         }
     }
 
@@ -355,56 +352,49 @@ final class AdBlockManager {
     }
 
     private func restorePersistedRules() {
-        for sourceId in metadataBySource.keys.sorted() {
-            guard let metadata = metadataBySource[sourceId] else {
-                continue
-            }
+        parseQueue.async { [weak self] in
+            guard let self = self else { return }
 
-            guard !metadata.ruleListIdentifiers.isEmpty else {
-                restoreCosmeticScripts(metadata: metadata)
-                continue
-            }
-
-            let group = DispatchGroup()
-            var restored = Array<WKContentRuleList?>(
-                repeating: nil,
-                count: metadata.ruleListIdentifiers.count
-            )
-
-            for (index, identifier) in metadata.ruleListIdentifiers.enumerated() {
-                group.enter()
-
-                WKContentRuleListStore.default().lookUpContentRuleList(
-                    forIdentifier: identifier
-                ) { ruleList, _ in
-                    restored[index] = ruleList
-                    group.leave()
-                }
-            }
-
-            group.notify(queue: .main) { [weak self] in
-                guard let self = self else {
-                    return
+            for sourceId in self.metadataBySource.keys.sorted() {
+                guard let metadata = self.metadataBySource[sourceId] else {
+                    continue
                 }
 
-                let lists = restored.compactMap { $0 }
+                if metadata.ruleListIdentifiers.isEmpty {
+                    self.restoreCosmeticScripts(metadata: metadata)
+                    continue
+                }
 
-                guard lists.count == metadata.ruleListIdentifiers.count else {
-                    var repairedMetadata = metadata
-                    repairedMetadata.ruleListIdentifiers = []
+                let group = DispatchGroup()
+                var restored = Array<WKContentRuleList?>(repeating: nil, count: metadata.ruleListIdentifiers.count)
 
-                    self.metadataBySource[sourceId] = repairedMetadata
-                    self.compiledListsBySource.removeValue(forKey: sourceId)
+                for (index, identifier) in metadata.ruleListIdentifiers.enumerated() {
+                    group.enter()
 
-                    self.saveMetadata(self.metadataBySource)
-                    self.restoreCosmeticScripts(metadata: repairedMetadata)
+                    DispatchQueue.main.async {
+                        WKContentRuleListStore.default().lookUpContentRuleList(
+                            forIdentifier: identifier
+                        ) { ruleList, _ in
+                            restored[index] = ruleList
+                            group.leave()
+                        }
+                    }
+                }
+
+                group.notify(queue: self.parseQueue) { [weak self] in
+                    guard let self = self else { return }
+
+                    let lists = restored.compactMap { $0 }
+
+                    guard lists.count == metadata.ruleListIdentifiers.count else {
+                        self.compileSource(id: sourceId, completion: nil)
+                        return
+                    }
+
+                    self.compiledListsBySource[sourceId] = lists
+                    self.restoreCosmeticScripts(metadata: metadata)
                     self.applyRulesToAttachedWebViews()
-                    return
                 }
-
-                self.compiledListsBySource[sourceId] = lists
-                self.restoreCosmeticScripts(metadata: metadata)
-                self.applyRulesToAttachedWebViews()
             }
         }
     }
@@ -461,14 +451,11 @@ final class AdBlockManager {
         sourceId: String,
         completion: ((Bool, String?) -> Void)?
     ) {
-        let oldMetadata = metadataBySource[sourceId]
-        let targetSlot = (oldMetadata?.activeSlot == "a") ? "b" : "a"
         let version = UUID().uuidString.replacingOccurrences(of: "-", with: "")
 
         guard !payload.networkChunks.isEmpty else {
             let metadata = AdBlockCompiledSourceMetadata(
                 sourceId: sourceId,
-                activeSlot: targetSlot,
                 ruleListIdentifiers: [],
                 ruleCount: payload.ruleCount,
                 skippedRuleCount: payload.skippedRuleCount,
@@ -479,84 +466,105 @@ final class AdBlockManager {
             saveMetadata(metadataBySource)
 
             compiledListsBySource.removeValue(forKey: sourceId)
-            restoreCosmeticScripts(metadata: metadata)
-            updatingSourceIds.remove(sourceId)
-            setUpdateStatus(
-                sourceId: sourceId,
-                status: nil
-            )
+            
+            parseQueue.async { [weak self] in
+                self?.restoreCosmeticScripts(metadata: metadata)
+                DispatchQueue.main.async {
+                    self?.updatingSourceIds.remove(sourceId)
+                    self?.setUpdateStatus(sourceId: sourceId, status: nil)
+                    self?.applyRulesToAttachedWebViews()
 
-            if let oldMetadata = oldMetadata {
-                removeStoredRuleLists(metadata: oldMetadata)
+                    let message = payload.skippedRuleCount > 0
+                        ? "已更新，跳过 \(payload.skippedRuleCount) 条不兼容规则"
+                        : nil
+
+                    completion?(true, message)
+                }
             }
-
-            applyRulesToAttachedWebViews()
-
-            let message = payload.skippedRuleCount > 0
-                ? "已更新，跳过 \(payload.skippedRuleCount) 条不兼容规则"
-                : nil
-
-            completion?(true, message)
             return
         }
 
-        compileChunksSequentially(
+        let deadline = Date().addingTimeInterval(
+            maximumCompilationDuration
+        )
+
+        compileChunks(
             payload.networkChunks,
             sourceId: sourceId,
-            slot: targetSlot,
             version: version,
             index: 0,
-            compiledLists: [],
-            compiledIdentifiers: [],
-            skippedCount: 0
-        ) { [weak self] lists, identifiers, extraSkipped in
-            guard let self = self else { return }
+            lists: [],
+            identifiers: [],
+            skippedChunks: 0,
+            deadline: deadline
+        ) { [weak self] lists, identifiers, skippedChunks in
+            guard let self = self else {
+                return
+            }
 
-            let totalSkipped = payload.skippedRuleCount + (extraSkipped * self.nativeRuleChunkSize)
+            guard !lists.isEmpty else {
+                self.updatingSourceIds.remove(sourceId)
+                self.setUpdateStatus(
+                    sourceId: sourceId,
+                    status: nil
+                )
+                completion?(false, "规则编译超时或所有规则块均不兼容")
+                return
+            }
 
             let metadata = AdBlockCompiledSourceMetadata(
                 sourceId: sourceId,
-                activeSlot: targetSlot,
                 ruleListIdentifiers: identifiers,
-                ruleCount: payload.ruleCount - (extraSkipped * self.nativeRuleChunkSize),
-                skippedRuleCount: totalSkipped,
+                ruleCount: payload.ruleCount,
+                skippedRuleCount: payload.skippedRuleCount + skippedChunks * self.nativeRuleChunkSize,
                 cosmeticRules: payload.cosmeticRules
             )
 
             self.metadataBySource[sourceId] = metadata
             self.saveMetadata(self.metadataBySource)
+
             self.compiledListsBySource[sourceId] = lists
-            self.restoreCosmeticScripts(metadata: metadata)
-            self.updatingSourceIds.remove(sourceId)
-            self.setUpdateStatus(
-                sourceId: sourceId,
-                status: nil
-            )
+            
+            self.parseQueue.async { [weak self] in
+                self?.restoreCosmeticScripts(metadata: metadata)
+                DispatchQueue.main.async {
+                    self?.updatingSourceIds.remove(sourceId)
+                    self?.setUpdateStatus(sourceId: sourceId, status: nil)
+                    self?.applyRulesToAttachedWebViews()
 
-            if let oldMetadata = oldMetadata {
-                self.removeStoredRuleLists(metadata: oldMetadata)
+                    let skipped = metadata.skippedRuleCount
+                    let message = skipped > 0
+                        ? "已更新，跳过约 \(skipped) 条不兼容规则"
+                        : nil
+
+                    completion?(true, message)
+                }
             }
-
-            self.applyRulesToAttachedWebViews()
-
-            let message = totalSkipped > 0 ? "已加载，但跳过了 \(totalSkipped) 条不兼容规则" : nil
-            completion?(true, message)
         }
     }
 
-    private func compileChunksSequentially(
-        _ chunks: [[[String: Any]]],
+    private func compileChunks(
+        _ chunks: [String],
         sourceId: String,
-        slot: String,
         version: String,
         index: Int,
-        compiledLists: [WKContentRuleList],
-        compiledIdentifiers: [String],
-        skippedCount: Int,
+        lists: [WKContentRuleList],
+        identifiers: [String],
+        skippedChunks: Int,
+        deadline: Date,
         completion: @escaping ([WKContentRuleList], [String], Int) -> Void
     ) {
         guard index < chunks.count else {
-            completion(compiledLists, compiledIdentifiers, skippedCount)
+            completion(lists, identifiers, skippedChunks)
+            return
+        }
+
+        guard Date() < deadline else {
+            completion(
+                lists,
+                identifiers,
+                skippedChunks + chunks.count - index
+            )
             return
         }
 
@@ -565,59 +573,62 @@ final class AdBlockManager {
             status: "正在编译规则 \(index + 1)/\(chunks.count)…"
         )
 
-        let identifier = "\(identifierPrefix).\(sourceId.replacingOccurrences(of: "-", with: "")).\(slot).\(index)"
+        let identifier = "\(identifierPrefix).\(sourceId.replacingOccurrences(of: "-", with: "")).\(version).\(index)"
+        let gate = AdBlockChunkCompilationGate()
 
-        guard let data = try? JSONSerialization.data(withJSONObject: chunks[index]),
-              let jsonString = String(data: data, encoding: .utf8) else {
-            compileChunksSequentially(
-                chunks,
-                sourceId: sourceId,
-                slot: slot,
-                version: version,
-                index: index + 1,
-                compiledLists: compiledLists,
-                compiledIdentifiers: compiledIdentifiers,
-                skippedCount: skippedCount + 1,
-                completion: completion
-            )
-            return
+        func finish(_ ruleList: WKContentRuleList?) {
+            gate.resolve {
+                DispatchQueue.main.async {
+                    var nextLists = lists
+                    var nextIdentifiers = identifiers
+                    var nextSkippedChunks = skippedChunks
+
+                    if let ruleList = ruleList {
+                        nextLists.append(ruleList)
+                        nextIdentifiers.append(identifier)
+                    } else {
+                        nextSkippedChunks += 1
+                    }
+
+                    self.compileChunks(
+                        chunks,
+                        sourceId: sourceId,
+                        version: version,
+                        index: index + 1,
+                        lists: nextLists,
+                        identifiers: nextIdentifiers,
+                        skippedChunks: nextSkippedChunks,
+                        deadline: deadline,
+                        completion: completion
+                    )
+                }
+            }
         }
 
         WKContentRuleListStore.default().compileContentRuleList(
             forIdentifier: identifier,
-            encodedContentRuleList: jsonString
-        ) { [weak self] ruleList, _ in
-            guard let self = self else { return }
+            encodedContentRuleList: chunks[index]
+        ) { ruleList, _ in
+            finish(ruleList)
+        }
 
-            var nextLists = compiledLists
-            var nextIdentifiers = compiledIdentifiers
-            var nextSkipped = skippedCount
+        let remainingTime = max(
+            1,
+            min(
+                maximumSingleChunkDuration,
+                deadline.timeIntervalSinceNow
+            )
+        )
 
-            if let ruleList = ruleList {
-                nextLists.append(ruleList)
-                nextIdentifiers.append(identifier)
-            } else {
-                nextSkipped += 1
-            }
-
-            DispatchQueue.main.async {
-                self.compileChunksSequentially(
-                    chunks,
-                    sourceId: sourceId,
-                    slot: slot,
-                    version: version,
-                    index: index + 1,
-                    compiledLists: nextLists,
-                    compiledIdentifiers: nextIdentifiers,
-                    skippedCount: nextSkipped,
-                    completion: completion
-                )
-            }
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + remainingTime
+        ) {
+            finish(nil)
         }
     }
 
     private func deactivateSource(id sourceId: String) {
-        let oldMetadata = metadataBySource.removeValue(forKey: sourceId)
+        metadataBySource.removeValue(forKey: sourceId)
         compiledListsBySource.removeValue(forKey: sourceId)
         cosmeticScriptsBySource.removeValue(forKey: sourceId)
         updatingSourceIds.remove(sourceId)
@@ -626,32 +637,20 @@ final class AdBlockManager {
             status: nil
         )
         saveMetadata(metadataBySource)
-
-        if let oldMetadata = oldMetadata {
-            removeStoredRuleLists(metadata: oldMetadata)
-        }
-
         applyRulesToAttachedWebViews()
-    }
-
-    private func removeStoredRuleLists(metadata: AdBlockCompiledSourceMetadata) {
-        for identifier in metadata.ruleListIdentifiers {
-            WKContentRuleListStore.default().removeContentRuleList(
-                forIdentifier: identifier,
-                completionHandler: nil
-            )
-        }
     }
 
     private func restoreCosmeticScripts(metadata: AdBlockCompiledSourceMetadata) {
         guard !metadata.cosmeticRules.isEmpty else {
-            cosmeticScriptsBySource.removeValue(forKey: metadata.sourceId)
+            DispatchQueue.main.async {
+                self.cosmeticScriptsBySource.removeValue(forKey: metadata.sourceId)
+            }
             return
         }
 
         let batches = cosmeticRuleBatches(metadata.cosmeticRules)
 
-        cosmeticScriptsBySource[metadata.sourceId] = batches.compactMap { rules in
+        let scripts = batches.compactMap { rules -> WKUserScript? in
             guard let data = try? JSONEncoder().encode(rules),
                   let json = String(data: data, encoding: .utf8) else {
                 return nil
@@ -840,33 +839,19 @@ final class AdBlockManager {
                 forMainFrameOnly: false
             )
         }
+        
+        DispatchQueue.main.async {
+            self.cosmeticScriptsBySource[metadata.sourceId] = scripts
+        }
     }
 
     private func cosmeticRuleBatches(
         _ rules: [AdBlockCosmeticRule]
     ) -> [[AdBlockCosmeticRule]] {
-        var result: [[AdBlockCosmeticRule]] = []
-        var current: [AdBlockCosmeticRule] = []
-
-        for rule in rules {
-            var candidate = current
-            candidate.append(rule)
-
-            let size = (try? JSONEncoder().encode(candidate).count) ?? 0
-
-            if size > cosmeticScriptPayloadLimit && !current.isEmpty {
-                result.append(current)
-                current = [rule]
-            } else {
-                current = candidate
-            }
+        let chunkSize = 800
+        return stride(from: 0, to: rules.count, by: chunkSize).map {
+            Array(rules[$0..<min($0 + chunkSize, rules.count)])
         }
-
-        if !current.isEmpty {
-            result.append(current)
-        }
-
-        return result
     }
 
     private func sourceText(id sourceId: String) -> String? {
@@ -882,34 +867,36 @@ final class AdBlockManager {
     }
 
     private func buildSourcePayload(text: String) -> AdBlockSourcePayload {
-        var networkChunks: [[[String: Any]]] = []
+        var networkChunks: [String] = []
         var currentRules: [[String: Any]] = []
         var cosmeticRules: [AdBlockCosmeticRule] = []
-        var acceptedNetworkRuleCount = 0
+        var ruleCount = 0
         var skippedRuleCount = 0
 
         text.enumerateLines { line, _ in
             let result = self.parseRule(line)
 
             if let networkRule = result.networkRule {
-                if acceptedNetworkRuleCount < self.maximumNativeRulesPerSource {
-                    currentRules.append(networkRule)
-                    acceptedNetworkRuleCount += 1
+                currentRules.append(networkRule)
+                ruleCount += 1
 
-                    if currentRules.count >= self.nativeRuleChunkSize {
-                        networkChunks.append(currentRules)
-                        currentRules.removeAll(keepingCapacity: true)
+                if currentRules.count >= self.nativeRuleChunkSize {
+                    if let json = self.jsonString(from: currentRules) {
+                        networkChunks.append(json)
                     }
-                } else {
-                    skippedRuleCount += 1
+                    currentRules.removeAll(keepingCapacity: true)
                 }
             }
 
-            for cosmeticRule in result.cosmeticRules {
-                if cosmeticRules.count < self.maximumCosmeticRulesPerSource {
-                    cosmeticRules.append(cosmeticRule)
-                } else {
-                    skippedRuleCount += 1
+            if !result.cosmeticRules.isEmpty {
+                for cosmeticRule in result.cosmeticRules {
+                    ruleCount += 1
+
+                    if cosmeticRules.count < self.maximumCosmeticRulesPerSource {
+                        cosmeticRules.append(cosmeticRule)
+                    } else {
+                        skippedRuleCount += 1
+                    }
                 }
             }
 
@@ -918,14 +905,15 @@ final class AdBlockManager {
             }
         }
 
-        if !currentRules.isEmpty {
-            networkChunks.append(currentRules)
+        if !currentRules.isEmpty,
+           let json = jsonString(from: currentRules) {
+            networkChunks.append(json)
         }
 
         return AdBlockSourcePayload(
             networkChunks: networkChunks,
             cosmeticRules: cosmeticRules,
-            ruleCount: acceptedNetworkRuleCount + cosmeticRules.count,
+            ruleCount: ruleCount,
             skippedRuleCount: skippedRuleCount
         )
     }
@@ -1262,7 +1250,6 @@ final class AdBlockManager {
 
 struct AdBlockCompiledSourceMetadata: Codable {
     var sourceId: String
-    var activeSlot: String
     var ruleListIdentifiers: [String]
     var ruleCount: Int
     var skippedRuleCount: Int
@@ -1270,7 +1257,7 @@ struct AdBlockCompiledSourceMetadata: Codable {
 }
 
 private struct AdBlockSourcePayload {
-    var networkChunks: [[[String: Any]]]
+    var networkChunks: [String]
     var cosmeticRules: [AdBlockCosmeticRule]
     var ruleCount: Int
     var skippedRuleCount: Int
@@ -1309,6 +1296,7 @@ struct AdBlockCosmeticRule: Codable {
 final class AdBlockManagerViewController: UIViewController, UITableViewDataSource, UITableViewDelegate {
     private var subscriptions: [AdBlockSubscription] = []
     private let tableView = UITableView(frame: .zero, style: .insetGrouped)
+    private var statusRefreshTimer: Timer?
 
     var onRulesChanged: (() -> Void)?
 
@@ -1322,20 +1310,16 @@ final class AdBlockManagerViewController: UIViewController, UITableViewDataSourc
         setupInterface()
         loadData()
 
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleStatusChanged),
-            name: NSNotification.Name("AdBlockStatusChanged"),
-            object: nil
-        )
+        statusRefreshTimer = Timer.scheduledTimer(
+            withTimeInterval: 0.8,
+            repeats: true
+        ) { [weak self] _ in
+            self?.tableView.reloadData()
+        }
     }
 
     deinit {
-        NotificationCenter.default.removeObserver(self)
-    }
-
-    @objc private func handleStatusChanged() {
-        tableView.reloadData()
+        statusRefreshTimer?.invalidate()
     }
 
     private func setupInterface() {
