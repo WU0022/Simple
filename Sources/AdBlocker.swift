@@ -18,14 +18,15 @@ final class AdBlockManager {
     private let enabledKey = "adblock_enabled_v2"
     private let subscriptionsKey = "adblock_subscriptions_v2"
     private let customRulesKey = "adblock_custom_rules_v2"
-    private let metadataKey = "adblock_compiled_metadata_v5"
-    private let identifierPrefix = "SimpleBrowserAdBlockV5"
+    private let metadataKey = "adblock_compiled_metadata_v6"
+    private let identifierPrefix = "SimpleBrowserAdBlockV6"
     private let nativeRuleChunkSize = 5000
-    private let maximumCosmeticRulesPerSource = 400
+    private let maximumCosmeticRulesPerSource = 12000
+    private let cosmeticScriptPayloadLimit = 180000
 
     private var attachedWebViews = NSHashTable<WKWebView>.weakObjects()
     private var compiledListsBySource: [String: [WKContentRuleList]] = [:]
-    private var cosmeticScriptsBySource: [String: WKUserScript] = [:]
+    private var cosmeticScriptsBySource: [String: [WKUserScript]] = [:]
     private var metadataBySource: [String: AdBlockCompiledSourceMetadata] = [:]
     private var updatingSourceIds = Set<String>()
     private let parseQueue = DispatchQueue(label: "SimpleBrowser.AdBlockParser", qos: .userInitiated)
@@ -156,7 +157,7 @@ final class AdBlockManager {
         }
 
         for sourceId in cosmeticScriptsBySource.keys.sorted() {
-            if let script = cosmeticScriptsBySource[sourceId] {
+            for script in cosmeticScriptsBySource[sourceId] ?? [] {
                 controller.addUserScript(script)
             }
         }
@@ -292,7 +293,7 @@ final class AdBlockManager {
             }
 
             if metadata.ruleListIdentifiers.isEmpty {
-                restoreCosmeticScript(metadata: metadata)
+                restoreCosmeticScripts(metadata: metadata)
                 continue
             }
 
@@ -323,7 +324,7 @@ final class AdBlockManager {
                 }
 
                 self.compiledListsBySource[sourceId] = lists
-                self.restoreCosmeticScript(metadata: metadata)
+                self.restoreCosmeticScripts(metadata: metadata)
                 self.applyRulesToAttachedWebViews()
             }
         }
@@ -384,7 +385,7 @@ final class AdBlockManager {
             saveMetadata(metadataBySource)
 
             compiledListsBySource.removeValue(forKey: sourceId)
-            restoreCosmeticScript(metadata: metadata)
+            restoreCosmeticScripts(metadata: metadata)
             updatingSourceIds.remove(sourceId)
             applyRulesToAttachedWebViews()
 
@@ -427,7 +428,7 @@ final class AdBlockManager {
             self.saveMetadata(self.metadataBySource)
 
             self.compiledListsBySource[sourceId] = lists
-            self.restoreCosmeticScript(metadata: metadata)
+            self.restoreCosmeticScripts(metadata: metadata)
             self.updatingSourceIds.remove(sourceId)
             self.applyRulesToAttachedWebViews()
 
@@ -498,122 +499,230 @@ final class AdBlockManager {
         applyRulesToAttachedWebViews()
     }
 
-    private func restoreCosmeticScript(metadata: AdBlockCompiledSourceMetadata) {
+    private func restoreCosmeticScripts(metadata: AdBlockCompiledSourceMetadata) {
         guard !metadata.cosmeticRules.isEmpty else {
             cosmeticScriptsBySource.removeValue(forKey: metadata.sourceId)
             return
         }
 
-        guard let data = try? JSONEncoder().encode(metadata.cosmeticRules),
-              let json = String(data: data, encoding: .utf8) else {
-            cosmeticScriptsBySource.removeValue(forKey: metadata.sourceId)
-            return
-        }
+        let batches = cosmeticRuleBatches(metadata.cosmeticRules)
 
-        let source = """
-        (function() {
-            var rules = \(json);
-            var host = (location.hostname || '').toLowerCase();
+        cosmeticScriptsBySource[metadata.sourceId] = batches.compactMap { rules in
+            guard let data = try? JSONEncoder().encode(rules),
+                  let json = String(data: data, encoding: .utf8) else {
+                return nil
+            }
 
-            function matchesDomain(rule) {
-                if (!rule.domains || rule.domains.length === 0) {
-                    return true;
-                }
+            let source = """
+            (function() {
+                var rules = \(json);
+                var fallbackRules = [];
+                var styleId = '__simple_browser_adblock_style__';
+                var host = (location.hostname || '').toLowerCase();
 
-                for (var i = 0; i < rule.domains.length; i++) {
-                    var domain = rule.domains[i];
-
-                    if (host === domain || host.endsWith('.' + domain)) {
+                function matchesDomain(rule) {
+                    if (!rule.domains || rule.domains.length === 0) {
                         return true;
                     }
-                }
 
-                return false;
-            }
+                    for (var i = 0; i < rule.domains.length; i++) {
+                        var domain = rule.domains[i];
 
-            function hideElement(element) {
-                if (!element) {
-                    return;
-                }
-
-                element.style.setProperty('display', 'none', 'important');
-                element.style.setProperty('visibility', 'hidden', 'important');
-                element.style.setProperty('pointer-events', 'none', 'important');
-            }
-
-            function applyRule(rule) {
-                if (!matchesDomain(rule)) {
-                    return;
-                }
-
-                if (rule.id && !rule.tag && (!rule.classNames || rule.classNames.length === 0) && (!rule.classContains || rule.classContains.length === 0)) {
-                    hideElement(document.getElementById(rule.id));
-                    return;
-                }
-
-                var elements = document.getElementsByTagName(rule.tag || '*');
-
-                for (var i = 0; i < elements.length; i++) {
-                    var element = elements[i];
-
-                    if (rule.id && element.id !== rule.id) {
-                        continue;
-                    }
-
-                    var matched = true;
-
-                    if (rule.classNames && rule.classNames.length > 0) {
-                        for (var j = 0; j < rule.classNames.length; j++) {
-                            if (!element.classList || !element.classList.contains(rule.classNames[j])) {
-                                matched = false;
-                                break;
-                            }
+                        if (host === domain || host.endsWith('.' + domain)) {
+                            return true;
                         }
                     }
 
-                    if (!matched) {
-                        continue;
-                    }
-
-                    if (rule.classContains && rule.classContains.length > 0) {
-                        var classText = String(element.getAttribute('class') || '');
-
-                        for (var k = 0; k < rule.classContains.length; k++) {
-                            if (classText.indexOf(rule.classContains[k]) === -1) {
-                                matched = false;
-                                break;
-                            }
-                        }
-                    }
-
-                    if (matched) {
-                        hideElement(element);
-                    }
+                    return false;
                 }
-            }
 
-            function applyAll() {
-                for (var i = 0; i < rules.length; i++) {
+                function hideElement(element) {
+                    if (!element) {
+                        return;
+                    }
+
+                    element.style.setProperty('display', 'none', 'important');
+                    element.style.setProperty('visibility', 'hidden', 'important');
+                    element.style.setProperty('pointer-events', 'none', 'important');
+                }
+
+                function hideBySelector(selector) {
                     try {
-                        applyRule(rules[i]);
+                        var elements = document.querySelectorAll(selector);
+
+                        for (var i = 0; i < elements.length; i++) {
+                            hideElement(elements[i]);
+                        }
+
+                        return true;
                     } catch (_) {
+                        return false;
                     }
                 }
-            }
 
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', applyAll, { once: true });
+                function hideByHasFallback(selector) {
+                    var hasIndex = selector.indexOf(':has(');
+
+                    if (hasIndex < 0 || !selector.endsWith(')')) {
+                        return;
+                    }
+
+                    var outerSelector = selector.substring(0, hasIndex).trim() || '*';
+                    var innerSelector = selector.substring(hasIndex + 5, selector.length - 1).trim();
+
+                    if (!innerSelector) {
+                        return;
+                    }
+
+                    var outerElements;
+
+                    try {
+                        outerElements = document.querySelectorAll(outerSelector);
+                    } catch (_) {
+                        return;
+                    }
+
+                    for (var i = 0; i < outerElements.length; i++) {
+                        var outerElement = outerElements[i];
+                        var matched = false;
+
+                        try {
+                            if (innerSelector.startsWith('>')) {
+                                matched = outerElement.querySelector(':scope ' + innerSelector) !== null;
+                            } else {
+                                matched = outerElement.querySelector(innerSelector) !== null;
+                            }
+                        } catch (_) {
+                            matched = false;
+                        }
+
+                        if (matched) {
+                            hideElement(outerElement);
+                        }
+                    }
+                }
+
+                function applyFallbackRules() {
+                    for (var i = 0; i < fallbackRules.length; i++) {
+                        var rule = fallbackRules[i];
+
+                        if (!matchesDomain(rule)) {
+                            continue;
+                        }
+
+                        if (!hideBySelector(rule.selector)) {
+                            hideByHasFallback(rule.selector);
+                        }
+                    }
+                }
+
+                function insertRules() {
+                    var style = document.getElementById(styleId);
+
+                    if (!style) {
+                        style = document.createElement('style');
+                        style.id = styleId;
+                        style.type = 'text/css';
+                        (document.head || document.documentElement).appendChild(style);
+                    }
+
+                    var sheet = style.sheet;
+
+                    if (!sheet) {
+                        return;
+                    }
+
+                    for (var i = 0; i < rules.length; i++) {
+                        var rule = rules[i];
+
+                        if (!matchesDomain(rule)) {
+                            continue;
+                        }
+
+                        try {
+                            sheet.insertRule(
+                                rule.selector + '{display:none !important;visibility:hidden !important;pointer-events:none !important;}',
+                                sheet.cssRules.length
+                            );
+                        } catch (_) {
+                            fallbackRules.push(rule);
+                        }
+                    }
+
+                    applyFallbackRules();
+                }
+
+                function scheduleFallbackApply() {
+                    var timer = null;
+
+                    var observer = new MutationObserver(function() {
+                        if (timer !== null) {
+                            return;
+                        }
+
+                        timer = setTimeout(function() {
+                            timer = null;
+                            applyFallbackRules();
+                        }, 300);
+                    });
+
+                    observer.observe(document.documentElement, {
+                        childList: true,
+                        subtree: true
+                    });
+                }
+
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', function() {
+                        insertRules();
+
+                        if (fallbackRules.length > 0) {
+                            scheduleFallbackApply();
+                        }
+                    }, { once: true });
+                } else {
+                    insertRules();
+
+                    if (fallbackRules.length > 0) {
+                        scheduleFallbackApply();
+                    }
+                }
+            })();
+            """
+
+            return WKUserScript(
+                source: source,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: false
+            )
+        }
+    }
+
+    private func cosmeticRuleBatches(
+        _ rules: [AdBlockCosmeticRule]
+    ) -> [[AdBlockCosmeticRule]] {
+        var result: [[AdBlockCosmeticRule]] = []
+        var current: [AdBlockCosmeticRule] = []
+
+        for rule in rules {
+            var candidate = current
+            candidate.append(rule)
+
+            let size = (try? JSONEncoder().encode(candidate).count) ?? 0
+
+            if size > cosmeticScriptPayloadLimit && !current.isEmpty {
+                result.append(current)
+                current = [rule]
             } else {
-                applyAll();
+                current = candidate
             }
-        })();
-        """
+        }
 
-        cosmeticScriptsBySource[metadata.sourceId] = WKUserScript(
-            source: source,
-            injectionTime: .atDocumentEnd,
-            forMainFrameOnly: false
-        )
+        if !current.isEmpty {
+            result.append(current)
+        }
+
+        return result
     }
 
     private func sourceText(id sourceId: String) -> String? {
@@ -650,13 +759,15 @@ final class AdBlockManager {
                 }
             }
 
-            if let cosmeticRule = result.cosmeticRule {
-                ruleCount += 1
+            if !result.cosmeticRules.isEmpty {
+                for cosmeticRule in result.cosmeticRules {
+                    ruleCount += 1
 
-                if cosmeticRules.count < self.maximumCosmeticRulesPerSource {
-                    cosmeticRules.append(cosmeticRule)
-                } else {
-                    skippedRuleCount += 1
+                    if cosmeticRules.count < self.maximumCosmeticRulesPerSource {
+                        cosmeticRules.append(cosmeticRule)
+                    } else {
+                        skippedRuleCount += 1
+                    }
                 }
             }
 
@@ -685,29 +796,37 @@ final class AdBlockManager {
               !line.hasPrefix("!"),
               !line.hasPrefix("！"),
               !line.hasPrefix("[") else {
-            return AdBlockParsedLine(networkRule: nil, cosmeticRule: nil, isUnsupported: false)
+            return AdBlockParsedLine(
+                networkRule: nil,
+                cosmeticRules: [],
+                isUnsupported: false
+            )
         }
 
         if line.contains("#@#") || line.contains("##+js") || line.contains("#%#") {
-            return AdBlockParsedLine(networkRule: nil, cosmeticRule: nil, isUnsupported: true)
+            return AdBlockParsedLine(
+                networkRule: nil,
+                cosmeticRules: [],
+                isUnsupported: true
+            )
         }
 
         if let range = line.range(of: "##") {
-            let domainText = String(line[..<range.lowerBound])
-            let selector = String(line[range.upperBound...])
+            let domainsText = String(line[..<range.lowerBound])
+            let selectorsText = String(line[range.upperBound...])
                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
-            guard let cosmeticRule = parseCosmeticRule(
-                selector: selector,
-                domains: normalizedDomains(from: domainText).include
-            ) else {
-                return AdBlockParsedLine(networkRule: nil, cosmeticRule: nil, isUnsupported: true)
+            let domains = normalizedDomains(from: domainsText).include
+            let selectors = splitSelectorList(selectorsText)
+
+            let cosmeticRules = selectors.compactMap { selector in
+                parseCosmeticRule(selector: selector, domains: domains)
             }
 
             return AdBlockParsedLine(
                 networkRule: nil,
-                cosmeticRule: cosmeticRule,
-                isUnsupported: false
+                cosmeticRules: cosmeticRules,
+                isUnsupported: cosmeticRules.count != selectors.count
             )
         }
 
@@ -728,7 +847,11 @@ final class AdBlockManager {
 
         guard !rawPattern.isEmpty,
               !rawPattern.hasPrefix("/") else {
-            return AdBlockParsedLine(networkRule: nil, cosmeticRule: nil, isUnsupported: true)
+            return AdBlockParsedLine(
+                networkRule: nil,
+                cosmeticRules: [],
+                isUnsupported: true
+            )
         }
 
         let options = parts.count > 1
@@ -775,7 +898,11 @@ final class AdBlockManager {
                         option.hasPrefix("rewrite") ||
                         option.hasPrefix("removeparam") ||
                         option.hasPrefix("csp") {
-                return AdBlockParsedLine(networkRule: nil, cosmeticRule: nil, isUnsupported: true)
+                return AdBlockParsedLine(
+                    networkRule: nil,
+                    cosmeticRules: [],
+                    isUnsupported: true
+                )
             }
         }
 
@@ -783,7 +910,11 @@ final class AdBlockManager {
 
         guard !filter.isEmpty,
               (try? NSRegularExpression(pattern: filter)) != nil else {
-            return AdBlockParsedLine(networkRule: nil, cosmeticRule: nil, isUnsupported: true)
+            return AdBlockParsedLine(
+                networkRule: nil,
+                cosmeticRules: [],
+                isUnsupported: true
+            )
         }
 
         var trigger: [String: Any] = [
@@ -812,7 +943,7 @@ final class AdBlockManager {
                     "type": isException ? "ignore-previous-rules" : "block"
                 ]
             ],
-            cosmeticRule: nil,
+            cosmeticRules: [],
             isUnsupported: false
         )
     }
@@ -821,164 +952,79 @@ final class AdBlockManager {
         selector: String,
         domains: [String]
     ) -> AdBlockCosmeticRule? {
-        guard !selector.isEmpty,
-              selector.count <= 512,
-              !selector.contains(":"),
-              !selector.contains(">"),
-              !selector.contains("+"),
-              !selector.contains("~"),
-              !selector.contains(","),
-              !selector.contains("\u{0000}") else {
-            return nil
-        }
+        let value = selector.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let classAttributePattern = #"\[class\*=(?:"([^"]*)"|'([^']*)')\]"#
-
-        guard let regex = try? NSRegularExpression(pattern: classAttributePattern) else {
-            return nil
-        }
-
-        let nsRange = NSRange(selector.startIndex..<selector.endIndex, in: selector)
-        let matches = regex.matches(in: selector, range: nsRange)
-
-        var classContains: [String] = []
-
-        for match in matches {
-            let firstRange = match.range(at: 1)
-            let secondRange = match.range(at: 2)
-
-            if firstRange.location != NSNotFound,
-               let range = Range(firstRange, in: selector) {
-                classContains.append(String(selector[range]))
-            } else if secondRange.location != NSNotFound,
-                      let range = Range(secondRange, in: selector) {
-                classContains.append(String(selector[range]))
-            }
-        }
-
-        let remaining = regex.stringByReplacingMatches(
-            in: selector,
-            range: nsRange,
-            withTemplate: ""
-        ).trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if remaining.hasPrefix("#") {
-            let id = String(remaining.dropFirst())
-
-            guard isSafeIdentifier(id) else {
-                return nil
-            }
-
-            return AdBlockCosmeticRule(
-                domains: domains,
-                tag: nil,
-                id: id,
-                classNames: [],
-                classContains: classContains
-            )
-        }
-
-        if remaining.hasPrefix(".") {
-            let className = String(remaining.dropFirst())
-
-            guard isSafeIdentifier(className) else {
-                return nil
-            }
-
-            return AdBlockCosmeticRule(
-                domains: domains,
-                tag: nil,
-                id: nil,
-                classNames: [className],
-                classContains: classContains
-            )
-        }
-
-        if remaining.contains("#") {
-            let parts = remaining.split(separator: "#", maxSplits: 1).map(String.init)
-
-            guard parts.count == 2,
-                  isSafeTag(parts[0]),
-                  isSafeIdentifier(parts[1]) else {
-                return nil
-            }
-
-            return AdBlockCosmeticRule(
-                domains: domains,
-                tag: parts[0].lowercased(),
-                id: parts[1],
-                classNames: [],
-                classContains: classContains
-            )
-        }
-
-        if remaining.contains(".") {
-            let parts = remaining.split(separator: ".", maxSplits: 1).map(String.init)
-
-            guard parts.count == 2,
-                  isSafeTag(parts[0]),
-                  isSafeIdentifier(parts[1]) else {
-                return nil
-            }
-
-            return AdBlockCosmeticRule(
-                domains: domains,
-                tag: parts[0].lowercased(),
-                id: nil,
-                classNames: [parts[1]],
-                classContains: classContains
-            )
-        }
-
-        if remaining.isEmpty {
-            guard !classContains.isEmpty else {
-                return nil
-            }
-
-            return AdBlockCosmeticRule(
-                domains: domains,
-                tag: nil,
-                id: nil,
-                classNames: [],
-                classContains: classContains
-            )
-        }
-
-        guard isSafeTag(remaining) else {
+        guard !value.isEmpty,
+              value.count <= 4096,
+              !value.contains("\u{0000}"),
+              !value.contains("{"),
+              !value.contains("}"),
+              !value.contains(";"),
+              !value.contains("<"),
+              !value.contains(">style") else {
             return nil
         }
 
         return AdBlockCosmeticRule(
             domains: domains,
-            tag: remaining.lowercased(),
-            id: nil,
-            classNames: [],
-            classContains: classContains
+            selector: value
         )
     }
 
-    private func isSafeIdentifier(_ value: String) -> Bool {
-        guard !value.isEmpty else {
-            return false
+    private func splitSelectorList(_ text: String) -> [String] {
+        var result: [String] = []
+        var current = ""
+        var parenthesesDepth = 0
+        var bracketsDepth = 0
+        var quote: Character?
+
+        for character in text {
+            if let currentQuote = quote {
+                current.append(character)
+
+                if character == currentQuote {
+                    quote = nil
+                }
+
+                continue
+            }
+
+            if character == "\"" || character == "'" {
+                quote = character
+                current.append(character)
+                continue
+            }
+
+            if character == "(" {
+                parenthesesDepth += 1
+            } else if character == ")" {
+                parenthesesDepth = max(0, parenthesesDepth - 1)
+            } else if character == "[" {
+                bracketsDepth += 1
+            } else if character == "]" {
+                bracketsDepth = max(0, bracketsDepth - 1)
+            }
+
+            if character == "," && parenthesesDepth == 0 && bracketsDepth == 0 {
+                let value = current.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                if !value.isEmpty {
+                    result.append(value)
+                }
+
+                current = ""
+            } else {
+                current.append(character)
+            }
         }
 
-        let allowed = CharacterSet(
-            charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
-        )
+        let value = current.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        return value.unicodeScalars.allSatisfy { allowed.contains($0) }
-    }
-
-    private func isSafeTag(_ value: String) -> Bool {
-        guard !value.isEmpty else {
-            return false
+        if !value.isEmpty {
+            result.append(value)
         }
 
-        let allowed = CharacterSet(
-            charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-"
-        )
-
-        return value.unicodeScalars.allSatisfy { allowed.contains($0) }
+        return result
     }
 
     private func normalizedDomains(
@@ -1090,16 +1136,13 @@ private struct AdBlockSourcePayload {
 
 private struct AdBlockParsedLine {
     var networkRule: [String: Any]?
-    var cosmeticRule: AdBlockCosmeticRule?
+    var cosmeticRules: [AdBlockCosmeticRule]
     var isUnsupported: Bool
 }
 
 struct AdBlockCosmeticRule: Codable {
     var domains: [String]
-    var tag: String?
-    var id: String?
-    var classNames: [String]
-    var classContains: [String]
+    var selector: String
 }
 
 final class AdBlockManagerViewController: UIViewController, UITableViewDataSource, UITableViewDelegate {
