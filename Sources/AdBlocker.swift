@@ -162,13 +162,14 @@ final class AdBlockManager {
         var request = URLRequest(
             url: url,
             cachePolicy: .reloadIgnoringLocalAndRemoteCacheData,
-            timeoutInterval: 30
+            timeoutInterval: 90
         )
 
         request.setValue(
             "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 Version/17.5 Mobile/15E148 Safari/604.1",
             forHTTPHeaderField: "User-Agent"
         )
+        request.setValue("gzip, deflate, br", forHTTPHeaderField: "Accept-Encoding")
 
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             guard let self = self else {
@@ -389,12 +390,6 @@ final class AdBlockManager {
                 return
             }
 
-            if let errorMessage = errorMessage {
-                self.updatingSourceIds.remove(sourceId)
-                completion?(false, errorMessage)
-                return
-            }
-
             let metadata = AdBlockCompiledSourceMetadata(
                 sourceId: sourceId,
                 version: newVersion,
@@ -444,13 +439,10 @@ final class AdBlockManager {
                 return
             }
 
-            guard let ruleList = ruleList else {
-                completion(lists, error?.localizedDescription ?? "编译校验错误")
-                return
-            }
-
             var nextLists = lists
-            nextLists.append(ruleList)
+            if let ruleList = ruleList {
+                nextLists.append(ruleList)
+            }
 
             self.compileChunk(
                 jsonStrings,
@@ -524,7 +516,7 @@ final class AdBlockManager {
             for rule in result.networkRules {
                 currentRules.append(rule)
 
-                if currentRules.count >= 3000 {
+                if currentRules.count >= 5000 {
                     if let json = jsonString(from: currentRules) {
                         chunks.append(json)
                     }
@@ -553,18 +545,16 @@ final class AdBlockManager {
     }
 
     private func isSupportedByContentBlockerJSON(_ selector: String) -> Bool {
-        if selector.contains(":has(") ||
-           selector.contains(":matches(") ||
-           selector.contains(":where(") ||
-           selector.contains(":xpath(") {
+        let trimmed = selector.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return false }
+        if trimmed.contains(":") || trimmed.contains("[") || trimmed.contains(">") || trimmed.contains("+") || trimmed.contains("~") || trimmed.contains(" ") {
             return false
         }
-
-        if selector.range(of: #"\[[^\]]+\s+[iI]\s*\]"#, options: .regularExpression) != nil {
-            return false
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_#.")
+        if trimmed.unicodeScalars.allSatisfy({ allowed.contains($0) }) {
+            return true
         }
-
-        return true
+        return false
     }
 
     private func parseABPLine(_ rawLine: String) -> AdBlockParsedLine {
