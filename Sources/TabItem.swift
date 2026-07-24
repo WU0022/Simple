@@ -456,6 +456,10 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         withError error: Error
     ) {
         isLoading = false
+        if shouldIgnoreNavigationError(error) {
+            delegate?.tabDidUpdate(self)
+            return
+        }
         isDisplayingFailurePage = true
         failedURL = navigationActionURL ?? webView.url
         failureError = error
@@ -468,6 +472,10 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         withError error: Error
     ) {
         isLoading = false
+        if shouldIgnoreNavigationError(error) {
+            delegate?.tabDidUpdate(self)
+            return
+        }
         isDisplayingFailurePage = true
         failedURL = navigationActionURL ?? webView.url
         failureError = error
@@ -526,6 +534,25 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         }
 
         UIApplication.shared.open(targetURL, options: [:], completionHandler: nil)
+    }
+
+    private func shouldIgnoreNavigationError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+
+        if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
+            return true
+        }
+
+        if nsError.domain == WKError.errorDomain {
+            if nsError.code == WKError.Code.frameLoadInterruptedByPolicyChange.rawValue {
+                return true
+            }
+            if nsError.code == WKError.Code.webContentProcessTerminated.rawValue {
+                return true
+            }
+        }
+
+        return false
     }
 
     private func fallbackURL(from intentURL: URL) -> URL? {
