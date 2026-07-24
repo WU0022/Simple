@@ -33,7 +33,6 @@ private struct AdBlockParsedLine {
 
 final class AdBlockManager {
     static let shared = AdBlockManager()
-
     static let customSourceId = "__custom_rules__"
 
     private let enabledKey = "adblock_enabled_v2"
@@ -361,7 +360,7 @@ final class AdBlockManager {
             }
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 45.0) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 120.0) {
             safeCompletion(false, "编译规则超时")
         }
 
@@ -565,40 +564,40 @@ final class AdBlockManager {
         var domStyleTable: [String: [String: String]] = [:]
         var ruleCount = 0
 
-        let lines = text.components(separatedBy: .newlines)
+        text.enumerateLines { line, _ in
+            autoreleasepool {
+                let result = self.parseABPLine(line)
 
-        for line in lines {
-            let result = parseABPLine(line)
+                for rule in result.networkRules {
+                    currentRules.append(rule)
 
-            for rule in result.networkRules {
-                currentRules.append(rule)
-
-                if currentRules.count >= 4000 {
-                    if let json = jsonString(from: currentRules) {
-                        chunks.append(json)
+                    if currentRules.count >= 2000 {
+                        if let json = self.jsonString(from: currentRules) {
+                            chunks.append(json)
+                        }
+                        currentRules.removeAll(keepingCapacity: true)
                     }
-                    currentRules.removeAll(keepingCapacity: true)
                 }
-            }
 
-            for (domain, selectors) in result.domHideSelectors {
-                domHideTable[domain, default: []].formUnion(selectors)
-            }
-
-            for (domain, selectors) in result.domExceptionSelectors {
-                domExceptionTable[domain, default: []].formUnion(selectors)
-            }
-
-            for (domain, styles) in result.domCustomStyles {
-                var currentStyles = domStyleTable[domain, default: [:]]
-                for (selector, css) in styles {
-                    currentStyles[selector] = css
+                for (domain, selectors) in result.domHideSelectors {
+                    domHideTable[domain, default: []].formUnion(selectors)
                 }
-                domStyleTable[domain] = currentStyles
-            }
 
-            if !result.networkRules.isEmpty || !result.domHideSelectors.isEmpty || !result.domExceptionSelectors.isEmpty || !result.domCustomStyles.isEmpty {
-                ruleCount += 1
+                for (domain, selectors) in result.domExceptionSelectors {
+                    domExceptionTable[domain, default: []].formUnion(selectors)
+                }
+
+                for (domain, styles) in result.domCustomStyles {
+                    var currentStyles = domStyleTable[domain, default: [:]]
+                    for (selector, css) in styles {
+                        currentStyles[selector] = css
+                    }
+                    domStyleTable[domain] = currentStyles
+                }
+
+                if !result.networkRules.isEmpty || !result.domHideSelectors.isEmpty || !result.domExceptionSelectors.isEmpty || !result.domCustomStyles.isEmpty {
+                    ruleCount += 1
+                }
             }
         }
 
@@ -626,7 +625,7 @@ final class AdBlockManager {
             return false
         }
 
-        if selector.range(of: #"\[[^\]]+\s+[iI]\s*\]"#, options: .regularExpression) != nil {
+        if selector.contains("[i]") || selector.contains("[I]") {
             return false
         }
 
@@ -634,7 +633,7 @@ final class AdBlockManager {
     }
 
     private func parseABPLine(_ rawLine: String) -> AdBlockParsedLine {
-        var line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !line.isEmpty,
               !line.hasPrefix("!"),
@@ -643,8 +642,7 @@ final class AdBlockManager {
             return AdBlockParsedLine(networkRules: [], domHideSelectors: [:], domExceptionSelectors: [:], domCustomStyles: [:])
         }
 
-        if line.contains("#@#") {
-            let range = line.range(of: "#@#")!
+        if let range = line.range(of: "#@#") {
             let domainsText = String(line[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
             let selectorsText = String(line[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -664,8 +662,7 @@ final class AdBlockManager {
             )
         }
 
-        if line.contains("##") {
-            let range = line.range(of: "##")!
+        if let range = line.range(of: "##") {
             let domainsText = String(line[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
             let selectorsText = String(line[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -743,19 +740,19 @@ final class AdBlockManager {
         }
 
         var isException = false
-        if line.hasPrefix("@@") {
+        var targetLine = line
+        if targetLine.hasPrefix("@@") {
             isException = true
-            line = String(line.dropFirst(2))
+            targetLine = String(targetLine.dropFirst(2))
         }
 
-        let pieces = line.split(
+        let pieces = targetLine.split(
             separator: "$",
             maxSplits: 1,
             omittingEmptySubsequences: false
         )
 
-        let rawPattern = String(pieces[0])
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let rawPattern = String(pieces[0]).trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !rawPattern.isEmpty else {
             return AdBlockParsedLine(networkRules: [], domHideSelectors: [:], domExceptionSelectors: [:], domCustomStyles: [:])
