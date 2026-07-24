@@ -70,11 +70,19 @@ final class AdBlockManager {
         UserDefaults.standard.string(forKey: customRulesKey) ?? ""
     }
 
-    func saveCustomRules(_ rules: String, completion: ((Bool) -> Void)? = nil) {
+    func saveCustomRules(
+        _ rules: String,
+        completion: ((Bool, String?) -> Void)? = nil
+    ) {
+        guard !updatingSourceIds.contains(Self.customSourceId) else {
+            completion?(false, "自定义规则正在保存")
+            return
+        }
+
         UserDefaults.standard.set(rules, forKey: customRulesKey)
 
-        compileSource(id: Self.customSourceId) { success, _ in
-            completion?(success)
+        compileSource(id: Self.customSourceId) { success, message in
+            completion?(success, message)
         }
     }
 
@@ -151,6 +159,12 @@ final class AdBlockManager {
             if let script = cosmeticScriptsBySource[sourceId] {
                 controller.addUserScript(script)
             }
+        }
+    }
+
+    private func applyRulesToAttachedWebViews() {
+        for webView in attachedWebViews.allObjects {
+            applyRules(to: webView)
         }
     }
 
@@ -249,7 +263,7 @@ final class AdBlockManager {
                 return
             }
 
-            self.compileSource(id: subscription.id) { success, message in
+            self.compileSource(id: subscription.id, isAlreadyUpdating: true) { success, message in
                 DispatchQueue.main.async {
                     self.updatingSourceIds.remove(subscription.id)
 
@@ -317,9 +331,10 @@ final class AdBlockManager {
 
     private func compileSource(
         id sourceId: String,
+        isAlreadyUpdating: Bool = false,
         completion: ((Bool, String?) -> Void)?
     ) {
-        guard !updatingSourceIds.contains(sourceId) || sourceId == Self.customSourceId else {
+        if !isAlreadyUpdating && updatingSourceIds.contains(sourceId) {
             completion?(false, "该规则源正在更新")
             return
         }
@@ -1079,7 +1094,7 @@ private struct AdBlockParsedLine {
     var isUnsupported: Bool
 }
 
-private struct AdBlockCosmeticRule: Codable {
+struct AdBlockCosmeticRule: Codable {
     var domains: [String]
     var tag: String?
     var id: String?
@@ -1422,7 +1437,7 @@ final class CustomRuleEditorViewController: UIViewController {
 
         navigationItem.rightBarButtonItem?.isEnabled = false
 
-        AdBlockManager.shared.saveCustomRules(rules) { [weak self] success in
+        AdBlockManager.shared.saveCustomRules(rules) { [weak self] success, message in
             guard let self = self else {
                 return
             }
@@ -1432,7 +1447,17 @@ final class CustomRuleEditorViewController: UIViewController {
             if success {
                 self.onSaved?()
                 self.navigationController?.popViewController(animated: true)
+                return
             }
+
+            let alert = UIAlertController(
+                title: "保存失败",
+                message: message ?? "自定义规则无法完成编译",
+                preferredStyle: .alert
+            )
+
+            alert.addAction(UIAlertAction(title: "确定", style: .default))
+            self.present(alert, animated: true)
         }
     }
 }
