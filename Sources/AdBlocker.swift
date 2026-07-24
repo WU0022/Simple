@@ -20,10 +20,8 @@ final class AdBlockManager {
     private let customRulesKey = "adblock_custom_rules_v2"
     private let metadataKey = "adblock_compiled_metadata_v8"
     private let identifierPrefix = "SimpleBrowserAdBlockV8"
-    
-    // 降低单块大小，防止 WebKit 编译进程崩溃
-    private let nativeRuleChunkSize = 2000
-    private let maximumCosmeticRulesPerSource = 15000
+    private let nativeRuleChunkSize = 5000
+    private let maximumCosmeticRulesPerSource = 100000
     private let cosmeticScriptPayloadLimit = 180000
     private let maximumCompilationDuration: TimeInterval = 180
     private let maximumSingleChunkDuration: TimeInterval = 45
@@ -60,6 +58,7 @@ final class AdBlockManager {
               let items = try? JSONDecoder().decode([AdBlockSubscription].self, from: data) else {
             return []
         }
+
         return items
     }
 
@@ -67,6 +66,7 @@ final class AdBlockManager {
         guard let data = try? JSONEncoder().encode(subscriptions) else {
             return
         }
+
         UserDefaults.standard.set(data, forKey: subscriptionsKey)
     }
 
@@ -359,7 +359,6 @@ final class AdBlockManager {
         }
     }
 
-    // 串行加载 WebKit 规则，防止并发读取导致底层崩溃
     private func loadRuleListsSequentially(
         identifiers: [String],
         index: Int,
@@ -549,6 +548,10 @@ final class AdBlockManager {
         let identifier = "\(identifierPrefix).\(sourceId.replacingOccurrences(of: "-", with: "")).\(version).\(index)"
         let gate = AdBlockChunkCompilationGate()
 
+        var mutableChunks = chunks
+        let currentChunkJSON = mutableChunks[index]
+        mutableChunks[index] = ""
+
         func finish(_ ruleList: WKContentRuleList?) {
             gate.resolve {
                 self.parseQueue.async {
@@ -564,7 +567,7 @@ final class AdBlockManager {
                     }
 
                     self.compileChunks(
-                        chunks,
+                        mutableChunks,
                         sourceId: sourceId,
                         version: version,
                         index: index + 1,
@@ -581,7 +584,7 @@ final class AdBlockManager {
         DispatchQueue.main.async {
             WKContentRuleListStore.default().compileContentRuleList(
                 forIdentifier: identifier,
-                encodedContentRuleList: chunks[index]
+                encodedContentRuleList: currentChunkJSON
             ) { ruleList, _ in
                 finish(ruleList)
             }
@@ -809,7 +812,6 @@ final class AdBlockManager {
         var skippedRuleCount = 0
 
         text.enumerateLines { line, _ in
-            // 引入 autoreleasepool 强制释放每行解析产生的临时内存，防止 OOM 闪退
             autoreleasepool {
                 let result = self.parseRule(line)
 
@@ -827,9 +829,9 @@ final class AdBlockManager {
 
                 if !result.cosmeticRules.isEmpty {
                     for cosmeticRule in result.cosmeticRules {
-                        ruleCount += 1
                         if cosmeticRules.count < self.maximumCosmeticRulesPerSource {
                             cosmeticRules.append(cosmeticRule)
+                            ruleCount += 1
                         } else {
                             skippedRuleCount += 1
                         }
@@ -975,6 +977,8 @@ final class AdBlockManager {
         let filter = urlFilterPattern(from: rawPattern)
 
         guard !filter.isEmpty,
+              filter.count < 256,
+              !filter.contains(".*.*.*.*"),
               (try? NSRegularExpression(pattern: filter)) != nil else {
             return AdBlockParsedLine(
                 networkRule: nil,
@@ -1125,22 +1129,32 @@ final class AdBlockManager {
     }
 
     private func urlFilterPattern(from pattern: String) -> String {
-        if pattern.hasPrefix("||") {
-            let domain = String(pattern.dropFirst(2))
-                .replacingOccurrences(of: "^", with: "")
+        var p = pattern
+        var prefix = ""
+        var suffix = ""
 
-            guard !domain.isEmpty else {
-                return ""
-            }
-
-            let escaped = NSRegularExpression.escapedPattern(for: domain)
-            return "https?://([^/]+\\.)?\(escaped)([:/].*)?"
+        if p.hasPrefix("||") {
+            p = String(p.dropFirst(2))
+            prefix = "^https?://([^/]+\\.)?"
+        } else if p.hasPrefix("|") {
+            p = String(p.dropFirst(1))
+            prefix = "^"
         }
 
-        var escaped = NSRegularExpression.escapedPattern(for: pattern)
+        if p.hasSuffix("|") {
+            p = String(p.dropLast(1))
+            suffix = "$"
+        }
+
+        var escaped = NSRegularExpression.escapedPattern(for: p)
         escaped = escaped.replacingOccurrences(of: "\\*", with: ".*")
-        escaped = escaped.replacingOccurrences(of: "\\^", with: "[^A-Za-z0-9_\\-.%]")
-        return ".*\(escaped).*"
+        escaped = escaped.replacingOccurrences(of: "\\^", with: "([^a-zA-Z0-9_\\-.%]|$)")
+
+        while escaped.contains(".*.*") {
+            escaped = escaped.replacingOccurrences(of: ".*.*", with: ".*")
+        }
+
+        return prefix + escaped + suffix
     }
 
     private func jsonString(from rules: [[String: Any]]) -> String? {
