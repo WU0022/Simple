@@ -812,8 +812,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return nil }
 
-        SearchHistoryStore.shared.addHistory(value)
-
         if value.hasPrefix("http://") || value.hasPrefix("https://") {
             if let url = URL(string: value) {
                 return url
@@ -836,6 +834,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             }
         }
 
+        SearchHistoryStore.shared.addHistory(value)
         return SearchEngineStore.shared.currentEngine.searchURL(query: value)
     }
 
@@ -1401,9 +1400,8 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             }
         ))
 
-        let isAdBlockOn = AdBlockManager.shared.isEnabled
         items.append(CustomBottomSheetItem(
-            title: isAdBlockOn ? "广告拦截: 开启" : "广告拦截: 关闭",
+            title: "广告拦截设置",
             handler: { [weak self] in
                 self?.showAdBlockerManager()
             }
