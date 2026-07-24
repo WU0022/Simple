@@ -26,13 +26,13 @@ final class UserScriptManagerViewController: UIViewController, UITableViewDataSo
         titleLabel.textColor = .label
         titleLabel.text = "管理面板"
 
-        let addButton = TouchButton(type: .system)
+        let addButton = TouchButton()
         addButton.translatesAutoresizingMaskIntoConstraints = false
         addButton.setImage(UIImage(systemName: "plus", withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .medium)), for: .normal)
         addButton.tintColor = .systemRed
         addButton.addTarget(self, action: #selector(handleAddScript), for: .touchUpInside)
 
-        let closeButton = TouchButton(type: .system)
+        let closeButton = TouchButton()
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         closeButton.setImage(UIImage(systemName: "xmark.circle.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .medium)), for: .normal)
         closeButton.tintColor = .tertiaryLabel
