@@ -46,7 +46,7 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         let userContentController = WKUserContentController()
         configuration.userContentController = userContentController
 
-        webView = WKWebView(frame: .zero, configuration: configuration)
+        webView = WKWebView(frame: UIScreen.main.bounds, configuration: configuration)
         super.init()
 
         webView.customUserAgent = UserAgentStore.shared.getSelectedUA()
