@@ -24,6 +24,7 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
     var isDisplayingFailurePage = false
     var previousURL: URL?
     var failureOriginURL: URL?
+    private var pendingRestoreURL: URL?
 
     private var hasInjectedScriptsForCurrentPage = false
     private var isLoadingFailureDocument = false
@@ -98,6 +99,29 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         failureOriginURL = nil
     }
 
+    func restoreSession(url: URL?, title: String) {
+        self.url = url
+        self.title = title.isEmpty ? (url?.host ?? "新标签页") : title
+        self.pendingRestoreURL = url
+        self.isDisplayingFailurePage = false
+        self.failedURL = nil
+        self.failureError = nil
+        self.failureOriginURL = nil
+    }
+
+    func consumePendingRestoreURL() -> URL? {
+        let url = pendingRestoreURL
+        pendingRestoreURL = nil
+        return url
+    }
+
+    func sessionURL() -> URL? {
+        if isDisplayingFailurePage {
+            return failedURL ?? url
+        }
+        return pendingRestoreURL ?? url
+    }
+
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let body = message.body as? [String: Any], let action = body["action"] as? String else { return }
 
@@ -131,10 +155,8 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
             let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
                 DispatchQueue.main.async {
                     if let error = error {
-                        let jsonErrData = try? JSONSerialization.data(withJSONObject: [error.localizedDescription], options: [])
-                        let jsonErrText = jsonErrData.flatMap { String(data: $0, encoding: .utf8) } ?? "[\"\"]"
-                        let unwrappedErr = String(jsonErrText.dropFirst().dropLast())
-                        self?.webView.evaluateJavaScript("window.__gm_handleXhrError('\(reqId)', \(unwrappedErr))", completionHandler: nil)
+                        let errEscaped = error.localizedDescription.replacingOccurrences(of: "'", with: "\\'")
+                        self?.webView.evaluateJavaScript("window.__gm_handleXhrError('\(reqId)', '\(errEscaped)')", completionHandler: nil)
                         return
                     }
 
