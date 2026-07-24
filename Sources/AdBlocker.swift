@@ -1122,6 +1122,7 @@ final class AdBlockManager {
 
         guard !filter.isEmpty,
               filter.count < 256,
+              filter.allSatisfy({ $0.isASCII }),
               (try? NSRegularExpression(pattern: filter)) != nil else {
             return AdBlockParsedLine(
                 networkRule: nil,
@@ -1275,7 +1276,9 @@ final class AdBlockManager {
         if pattern.hasPrefix("||") {
             let domainOnly = String(pattern.dropFirst(2)).replacingOccurrences(of: "^", with: "")
             let cleanDomain = domainOnly.trimmingCharacters(in: .whitespacesAndNewlines)
-            let escapedDomain = NSRegularExpression.escapedPattern(for: cleanDomain)
+            var escapedDomain = NSRegularExpression.escapedPattern(for: cleanDomain)
+            escapedDomain = escapedDomain.replacingOccurrences(of: "\\*", with: ".*")
+            escapedDomain = escapedDomain.replacingOccurrences(of: "\\^", with: ".*")
             regexPattern = ".*" + escapedDomain + ".*"
         } else {
             var p = pattern.trimmingCharacters(in: .whitespacesAndNewlines)
