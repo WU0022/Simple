@@ -153,9 +153,6 @@ final class CleanOptionRowCell: UITableViewCell {
     private let titleLabel = UILabel()
     private let checkIcon = UIImageView()
 
-    private var actionConstraints: [NSLayoutConstraint] = []
-    private var standardConstraints: [NSLayoutConstraint] = []
-
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
         backgroundColor = .secondarySystemGroupedBackground
@@ -170,12 +167,7 @@ final class CleanOptionRowCell: UITableViewCell {
         contentView.addSubview(titleLabel)
         contentView.addSubview(checkIcon)
 
-        actionConstraints = [
-            titleLabel.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
-            titleLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor)
-        ]
-
-        standardConstraints = [
+        NSLayoutConstraint.activate([
             titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             titleLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
             titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: checkIcon.leadingAnchor, constant: -8),
@@ -184,7 +176,7 @@ final class CleanOptionRowCell: UITableViewCell {
             checkIcon.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
             checkIcon.widthAnchor.constraint(equalToConstant: 18),
             checkIcon.heightAnchor.constraint(equalToConstant: 18)
-        ]
+        ])
     }
 
     required init?(coder: NSCoder) { nil }
@@ -196,15 +188,27 @@ final class CleanOptionRowCell: UITableViewCell {
             titleLabel.textAlignment = .center
             titleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
             checkIcon.isHidden = true
-            NSLayoutConstraint.deactivate(standardConstraints)
-            NSLayoutConstraint.activate(actionConstraints)
+            NSLayoutConstraint.deactivate(contentView.constraints)
+            NSLayoutConstraint.activate([
+                titleLabel.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+                titleLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor)
+            ])
         } else {
             titleLabel.textColor = .label
             titleLabel.textAlignment = .left
             titleLabel.font = .systemFont(ofSize: 15, weight: .medium)
             checkIcon.isHidden = !isChecked
-            NSLayoutConstraint.deactivate(actionConstraints)
-            NSLayoutConstraint.activate(standardConstraints)
+            NSLayoutConstraint.deactivate(contentView.constraints)
+            NSLayoutConstraint.activate([
+                titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+                titleLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+                titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: checkIcon.leadingAnchor, constant: -8),
+
+                checkIcon.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+                checkIcon.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+                checkIcon.widthAnchor.constraint(equalToConstant: 18),
+                checkIcon.heightAnchor.constraint(equalToConstant: 18)
+            ])
         }
     }
 }
