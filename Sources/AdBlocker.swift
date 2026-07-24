@@ -150,10 +150,10 @@ final class AdBlockManager {
 
     func fetchSubscription(
         _ subscription: AdBlockSubscription,
-        completion: @escaping (Bool, Int) -> Void
+        completion: @escaping (Bool, Int, String?) -> Void
     ) {
         guard let url = URL(string: subscription.urlString) else {
-            completion(false, 0)
+            completion(false, 0, "无效的 URL 地址")
             return
         }
 
@@ -175,21 +175,34 @@ final class AdBlockManager {
                 return
             }
 
-            if error != nil {
+            if let error = error {
                 DispatchQueue.main.async {
                     self.updatingSourceIds.remove(subscription.id)
-                    completion(false, 0)
+                    completion(false, 0, "网络请求错误：\(error.localizedDescription)")
                 }
                 return
             }
 
-            guard let httpResponse = response as? HTTPURLResponse,
-                  (200...299).contains(httpResponse.statusCode),
-                  let data = data,
-                  !data.isEmpty else {
+            guard let httpResponse = response as? HTTPURLResponse else {
                 DispatchQueue.main.async {
                     self.updatingSourceIds.remove(subscription.id)
-                    completion(false, 0)
+                    completion(false, 0, "服务器未返回有效响应")
+                }
+                return
+            }
+
+            guard (200...299).contains(httpResponse.statusCode) else {
+                DispatchQueue.main.async {
+                    self.updatingSourceIds.remove(subscription.id)
+                    completion(false, 0, "服务器响应 HTTP \(httpResponse.statusCode)")
+                }
+                return
+            }
+
+            guard let data = data, !data.isEmpty else {
+                DispatchQueue.main.async {
+                    self.updatingSourceIds.remove(subscription.id)
+                    completion(false, 0, "规则文件内容为空")
                 }
                 return
             }
@@ -202,7 +215,7 @@ final class AdBlockManager {
             guard !text.isEmpty else {
                 DispatchQueue.main.async {
                     self.updatingSourceIds.remove(subscription.id)
-                    completion(false, 0)
+                    completion(false, 0, "文本解码失败")
                 }
                 return
             }
@@ -214,12 +227,12 @@ final class AdBlockManager {
             } catch {
                 DispatchQueue.main.async {
                     self.updatingSourceIds.remove(subscription.id)
-                    completion(false, 0)
+                    completion(false, 0, "保存规则文件失败")
                 }
                 return
             }
 
-            self.compileSource(id: subscription.id) { success, _ in
+            self.compileSource(id: subscription.id) { success, compileErr in
                 DispatchQueue.main.async {
                     self.updatingSourceIds.remove(subscription.id)
                     let compiledRules = self.ruleCount(sourceId: subscription.id)
@@ -231,7 +244,7 @@ final class AdBlockManager {
                         self.saveSubscriptions(subscriptions)
                     }
 
-                    completion(success, compiledRules)
+                    completion(success, compiledRules, compileErr)
                 }
             }
         }.resume()
@@ -445,7 +458,7 @@ final class AdBlockManager {
             }
 
             guard let ruleList = ruleList else {
-                completion(lists, error?.localizedDescription ?? "编译校验错误")
+                completion(lists, error?.localizedDescription ?? "编译规则校验时发生未知异常")
                 return
             }
 
@@ -785,14 +798,6 @@ final class AdBlockManager {
             domHideSelectors: [:],
             domExceptionSelectors: [:],
             domCustomStyles: [:]
-        )
-    }
-
-    private func sanitizeAttributeSelector(_ selector: String) -> String {
-        return selector.replacingOccurrences(
-            of: #"(\[[^\]]+)\s+[iI](\s*\])"#,
-            with: "$1$2",
-            options: .regularExpression
         )
     }
 
@@ -1306,19 +1311,22 @@ final class AdBlockManagerViewController: UIViewController, UITableViewDataSourc
 
             self.loadData()
 
-            AdBlockManager.shared.fetchSubscription(subscription) { [weak self] success, count in
+            AdBlockManager.shared.fetchSubscription(subscription) { [weak self] downloadSuccess, count, errorMsg in
                 guard let self = self else {
                     return
                 }
 
                 self.loadData()
 
-                let message = success
-                    ? "更新完成，共加载 \(count) 条规则。刷新页面后生效。"
-                    : "规则更新失败，请检查网络链接"
+                let message: String
+                if downloadSuccess {
+                    message = "更新完成，共加载 \(count) 条规则。刷新页面后生效。"
+                } else {
+                    message = errorMsg ?? "规则下载或更新失败"
+                }
 
                 let result = UIAlertController(
-                    title: success ? "规则更新完成" : "规则更新失败",
+                    title: downloadSuccess ? "规则更新完成" : "规则更新失败",
                     message: message,
                     preferredStyle: .alert
                 )
@@ -1353,19 +1361,22 @@ final class AdBlockManagerViewController: UIViewController, UITableViewDataSourc
             let subscription = AdBlockManager.shared.addSubscription(name: name, urlString: urlStr)
             self?.loadData()
 
-            AdBlockManager.shared.fetchSubscription(subscription) { [weak self] success, count in
+            AdBlockManager.shared.fetchSubscription(subscription) { [weak self] downloadSuccess, count, errorMsg in
                 guard let self = self else {
                     return
                 }
 
                 self.loadData()
 
-                let message = success
-                    ? "更新完成，共加载 \(count) 条规则。刷新页面后生效。"
-                    : "规则更新失败，请检查网络链接"
+                let message: String
+                if downloadSuccess {
+                    message = "更新完成，共加载 \(count) 条规则。刷新页面后生效。"
+                } else {
+                    message = errorMsg ?? "规则下载或更新失败"
+                }
 
                 let result = UIAlertController(
-                    title: success ? "规则更新完成" : "规则更新失败",
+                    title: downloadSuccess ? "规则更新完成" : "规则更新失败",
                     message: message,
                     preferredStyle: .alert
                 )
