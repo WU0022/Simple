@@ -22,10 +22,10 @@ final class AdBlockManager {
     private let identifierPrefix = "SimpleBrowserAdBlockV7"
     private let nativeRuleChunkSize = 1500
     private let maximumNativeRulesPerSource = 150000
-    private let maximumCosmeticRulesPerSource = 150000
+    private let maximumCosmeticRulesPerSource = 2000
     private let cosmeticScriptPayloadLimit = 180000
-    private let maximumCompilationDuration: TimeInterval = 180
-    private let maximumSingleChunkDuration: TimeInterval = 30
+    private let maximumCompilationDuration: TimeInterval = 90
+    private let maximumSingleChunkDuration: TimeInterval = 20
 
     private var attachedWebViews = NSHashTable<WKWebView>.weakObjects()
     private var compiledListsBySource: [String: [WKContentRuleList]] = [:]
@@ -504,7 +504,6 @@ final class AdBlockManager {
             payload.networkChunks,
             sourceId: sourceId,
             slot: targetSlot,
-            version: version,
             index: 0,
             lists: [],
             identifiers: [],
@@ -565,7 +564,7 @@ final class AdBlockManager {
     }
 
     private func compileChunks(
-        _ chunks: [[String: Any]],
+        _ chunks: [[[String: Any]]],
         sourceId: String,
         slot: String,
         index: Int,
@@ -964,7 +963,7 @@ final class AdBlockManager {
     }
 
     private func buildSourcePayload(text: String) -> AdBlockSourcePayload {
-        var networkChunks: [[String: Any]] = []
+        var networkChunks: [[[String: Any]]] = []
         var currentRules: [[String: Any]] = []
         var cosmeticRules: [AdBlockCosmeticRule] = []
         var acceptedNetworkRuleCount = 0
@@ -1352,7 +1351,7 @@ struct AdBlockCompiledSourceMetadata: Codable {
 }
 
 private struct AdBlockSourcePayload {
-    var networkChunks: [[String: Any]]
+    var networkChunks: [[[String: Any]]]
     var cosmeticRules: [AdBlockCosmeticRule]
     var ruleCount: Int
     var skippedRuleCount: Int
