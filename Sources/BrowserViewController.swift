@@ -21,7 +21,7 @@ class TouchButton: UIButton {
     private let hapticGenerator = UIImpactFeedbackGenerator(style: .medium)
     var hitTestInsets: UIEdgeInsets = .zero
 
-    convenience init(type buttonType: UIButton.ButtonType) {
+    convenience init() {
         self.init(frame: .zero)
     }
 
@@ -78,26 +78,26 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     private let failureTitleLabel = UILabel()
     private let failureReasonLabel = UILabel()
     private let failureURLLabel = UILabel()
-    private let failureBackButton = TouchButton(type: .system)
-    private let failureReloadButton = TouchButton(type: .system)
+    private let failureBackButton = TouchButton()
+    private let failureReloadButton = TouchButton()
 
     private let editingDimmingView = UIView()
 
     private let bottomPanel = UIView()
     private let addressShadowView = UIView()
     private let addressContainer = UIView()
-    private let lockButton = TouchButton(type: .system)
+    private let lockButton = TouchButton()
     private let addressField = UITextField()
-    private let refreshButton = TouchButton(type: .system)
-    private let clearButton = TouchButton(type: .system)
+    private let refreshButton = TouchButton()
+    private let clearButton = TouchButton()
     private let progressView = UIProgressView(progressViewStyle: .default)
 
     private let navigationStack = UIStackView()
-    private let backButton = TouchButton(type: .system)
-    private let forwardButton = TouchButton(type: .system)
-    private let pluginButton = TouchButton(type: .system)
-    private let tabsButton = TouchButton(type: .system)
-    private let moreButton = TouchButton(type: .system)
+    private let backButton = TouchButton()
+    private let forwardButton = TouchButton()
+    private let pluginButton = TouchButton()
+    private let tabsButton = TouchButton()
+    private let moreButton = TouchButton()
 
     private var bottomPanelBottomConstraint: NSLayoutConstraint?
     private var webTopSafeConstraint: NSLayoutConstraint?
@@ -1134,10 +1134,9 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             }
 
             if let sourceID = sourceID,
-               let sourceIndex = tabs.firstIndex(where: { $0.id == sourceID }) {
+               tabs.contains(where: { $0.id == sourceID }) {
                 let closingIndex = activeTabIndex
                 closeTab(at: closingIndex)
-                switchTab(to: sourceIndex)
                 return
             }
 
@@ -1147,10 +1146,9 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         if activeTab.webView.canGoBack {
             activeTab.webView.goBack()
-        } else if let sourceID = activeTab.sourceTabID, let sourceIndex = tabs.firstIndex(where: { $0.id == sourceID }) {
+        } else if let sourceID = activeTab.sourceTabID, tabs.contains(where: { $0.id == sourceID }) {
             let closingIndex = activeTabIndex
             closeTab(at: closingIndex)
-            switchTab(to: sourceIndex)
         } else if let prevURL = activeTab.previousURL, prevURL != activeTab.url {
             load(url: prevURL)
         } else if tabs.count > 1 {
@@ -1515,9 +1513,13 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
     private func showUserAgentManager() {
         let manager = UserAgentManagerViewController()
-        manager.onUASelected = { [weak self] newUA in
-            self?.activeTab.webView.customUserAgent = newUA
-            self?.activeTab.webView.reload()
+        manager.onUASelected = { [weak self] item in
+            guard let self = self else { return }
+            let isDesktop = item.id == "default_mac"
+            self.activeTab.webView.customUserAgent = item.uaString
+            self.activeTab.webView.configuration.defaultWebpagePreferences.preferredContentMode = isDesktop ? .desktop : .mobile
+            self.activeTab.reloadUserScripts()
+            self.activeTab.webView.reloadFromOrigin()
         }
         let nav = UINavigationController(rootViewController: manager)
         present(nav, animated: true)
