@@ -815,8 +815,8 @@ final class AdBlockManager {
 
         if !includeDomains.isEmpty {
             trigger["if-domain"] = Array(Set(includeDomains))
-        } else if !unlessDomains.isEmpty {
-            trigger["unless-domain"] = Array(Set(unlessDomains))
+        } else if !excludeDomains.isEmpty {
+            trigger["unless-domain"] = Array(Set(excludeDomains))
         }
 
         if !resourceTypes.isEmpty {
