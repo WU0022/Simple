@@ -131,8 +131,10 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
             let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
                 DispatchQueue.main.async {
                     if let error = error {
-                        let errEscaped = error.localizedDescription.replacingOccurrences(of: "'", with: "\\'")
-                        self?.webView.evaluateJavaScript("window.__gm_handleXhrError('\(reqId)', '\(errEscaped)')", completionHandler: nil)
+                        let jsonErrData = try? JSONSerialization.data(withJSONObject: [error.localizedDescription], options: [])
+                        let jsonErrText = jsonErrData.flatMap { String(data: $0, encoding: .utf8) } ?? "[\"\"]"
+                        let unwrappedErr = String(jsonErrText.dropFirst().dropLast())
+                        self?.webView.evaluateJavaScript("window.__gm_handleXhrError('\(reqId)', \(unwrappedErr))", completionHandler: nil)
                         return
                     }
 
