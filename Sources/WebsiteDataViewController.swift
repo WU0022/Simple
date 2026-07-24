@@ -19,7 +19,7 @@ final class WebsiteDataManagerViewController: UITableViewController, UISearchRes
         definesPresentationContext = true
 
         navigationItem.leftBarButtonItem = UIBarButtonItem(title: "关闭", style: .plain, target: self, action: #selector(handleDone))
-        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "清理未锁定数据", style: .plain, target: self, action: #selector(handleCleanAllCaches))
+        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "清理缓存", style: .plain, target: self, action: #selector(handleCleanAllCaches))
         loadData()
     }
 
