@@ -27,7 +27,7 @@ final class CustomBottomSheetViewController: UIViewController {
         titleLabel.textColor = .label
         titleLabel.text = titleString
 
-        let closeButton = TouchButton(type: .system)
+        let closeButton = TouchButton()
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         closeButton.tintColor = .tertiaryLabel
         closeButton.setImage(UIImage(systemName: "xmark.circle.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .medium)), for: .normal)
@@ -121,7 +121,7 @@ final class CustomBottomSheetViewController: UIViewController {
     }
 
     private func createCardButton(item: CustomBottomSheetItem, tag: Int, height: CGFloat) -> TouchButton {
-        let card = TouchButton(type: .custom)
+        let card = TouchButton()
         card.translatesAutoresizingMaskIntoConstraints = false
         card.backgroundColor = .white
         card.layer.cornerRadius = 16
