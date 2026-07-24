@@ -564,13 +564,10 @@ final class AdBlockManager {
         var domExceptionTable: [String: Set<String>] = [:]
         var domStyleTable: [String: [String: String]] = [:]
         var ruleCount = 0
-        let maxRulesLimit = 50000
 
         let lines = text.components(separatedBy: .newlines)
 
         for line in lines {
-            if ruleCount >= maxRulesLimit { break }
-
             let result = parseABPLine(line)
 
             for rule in result.networkRules {
@@ -818,8 +815,8 @@ final class AdBlockManager {
 
         if !includeDomains.isEmpty {
             trigger["if-domain"] = Array(Set(includeDomains))
-        } else if !excludeDomains.isEmpty {
-            trigger["unless-domain"] = Array(Set(excludeDomains))
+        } else if !unlessDomains.isEmpty {
+            trigger["unless-domain"] = Array(Set(unlessDomains))
         }
 
         if !resourceTypes.isEmpty {
