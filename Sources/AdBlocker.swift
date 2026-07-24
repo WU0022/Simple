@@ -20,7 +20,10 @@ final class AdBlockManager {
     private let customRulesKey = "adblock_custom_rules_v2"
     private let metadataKey = "adblock_compiled_metadata_v8"
     private let identifierPrefix = "SimpleBrowserAdBlockV8"
-    private let nativeRuleChunkSize = 5000
+    
+    // 降低单块大小，防止 WebKit 编译进程崩溃
+    private let nativeRuleChunkSize = 2000
+    private let maximumCosmeticRulesPerSource = 15000
     private let cosmeticScriptPayloadLimit = 180000
     private let maximumCompilationDuration: TimeInterval = 180
     private let maximumSingleChunkDuration: TimeInterval = 45
@@ -57,7 +60,6 @@ final class AdBlockManager {
               let items = try? JSONDecoder().decode([AdBlockSubscription].self, from: data) else {
             return []
         }
-
         return items
     }
 
@@ -65,7 +67,6 @@ final class AdBlockManager {
         guard let data = try? JSONEncoder().encode(subscriptions) else {
             return
         }
-
         UserDefaults.standard.set(data, forKey: subscriptionsKey)
     }
 
@@ -149,10 +150,12 @@ final class AdBlockManager {
         sourceId: String,
         status: String?
     ) {
-        if let status = status {
-            updateStatusBySource[sourceId] = status
-        } else {
-            updateStatusBySource.removeValue(forKey: sourceId)
+        DispatchQueue.main.async { [weak self] in
+            if let status = status {
+                self?.updateStatusBySource[sourceId] = status
+            } else {
+                self?.updateStatusBySource.removeValue(forKey: sourceId)
+            }
         }
     }
 
@@ -236,17 +239,12 @@ final class AdBlockManager {
         )
 
         URLSession(configuration: configuration).dataTask(with: request) { [weak self] data, response, error in
-            guard let self = self else {
-                return
-            }
+            guard let self = self else { return }
 
             if let error = error {
                 DispatchQueue.main.async {
                     self.updatingSourceIds.remove(subscription.id)
-                    self.setUpdateStatus(
-                        sourceId: subscription.id,
-                        status: nil
-                    )
+                    self.setUpdateStatus(sourceId: subscription.id, status: nil)
                     completion(false, 0, error.localizedDescription)
                 }
                 return
@@ -255,10 +253,7 @@ final class AdBlockManager {
             guard let httpResponse = response as? HTTPURLResponse else {
                 DispatchQueue.main.async {
                     self.updatingSourceIds.remove(subscription.id)
-                    self.setUpdateStatus(
-                        sourceId: subscription.id,
-                        status: nil
-                    )
+                    self.setUpdateStatus(sourceId: subscription.id, status: nil)
                     completion(false, 0, "服务器未返回 HTTP 响应")
                 }
                 return
@@ -267,10 +262,7 @@ final class AdBlockManager {
             guard (200...299).contains(httpResponse.statusCode) else {
                 DispatchQueue.main.async {
                     self.updatingSourceIds.remove(subscription.id)
-                    self.setUpdateStatus(
-                        sourceId: subscription.id,
-                        status: nil
-                    )
+                    self.setUpdateStatus(sourceId: subscription.id, status: nil)
                     completion(false, 0, "服务器返回 HTTP \(httpResponse.statusCode)")
                 }
                 return
@@ -279,10 +271,7 @@ final class AdBlockManager {
             guard let data = data, !data.isEmpty else {
                 DispatchQueue.main.async {
                     self.updatingSourceIds.remove(subscription.id)
-                    self.setUpdateStatus(
-                        sourceId: subscription.id,
-                        status: nil
-                    )
+                    self.setUpdateStatus(sourceId: subscription.id, status: nil)
                     completion(false, 0, "订阅内容为空")
                 }
                 return
@@ -293,10 +282,7 @@ final class AdBlockManager {
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 DispatchQueue.main.async {
                     self.updatingSourceIds.remove(subscription.id)
-                    self.setUpdateStatus(
-                        sourceId: subscription.id,
-                        status: nil
-                    )
+                    self.setUpdateStatus(sourceId: subscription.id, status: nil)
                     completion(false, 0, "订阅内容不是有效文本")
                 }
                 return
@@ -311,10 +297,7 @@ final class AdBlockManager {
             } catch {
                 DispatchQueue.main.async {
                     self.updatingSourceIds.remove(subscription.id)
-                    self.setUpdateStatus(
-                        sourceId: subscription.id,
-                        status: nil
-                    )
+                    self.setUpdateStatus(sourceId: subscription.id, status: nil)
                     completion(false, 0, "订阅文件保存失败：\(error.localizedDescription)")
                 }
                 return
@@ -328,16 +311,12 @@ final class AdBlockManager {
             self.compileSource(id: subscription.id, isAlreadyUpdating: true) { success, message in
                 DispatchQueue.main.async {
                     self.updatingSourceIds.remove(subscription.id)
-                    self.setUpdateStatus(
-                        sourceId: subscription.id,
-                        status: nil
-                    )
+                    self.setUpdateStatus(sourceId: subscription.id, status: nil)
 
                     let count = self.ruleCount(sourceId: subscription.id)
 
                     if success {
                         var subscriptions = self.loadSubscriptions()
-
                         if let index = subscriptions.firstIndex(where: { $0.id == subscription.id }) {
                             subscriptions[index].lastUpdated = Date()
                             subscriptions[index].ruleCount = count
@@ -365,35 +344,46 @@ final class AdBlockManager {
                     continue
                 }
 
-                let group = DispatchGroup()
-                var restored = Array<WKContentRuleList?>(repeating: nil, count: metadata.ruleListIdentifiers.count)
-
-                for (index, identifier) in metadata.ruleListIdentifiers.enumerated() {
-                    group.enter()
-
-                    DispatchQueue.main.async {
-                        WKContentRuleListStore.default().lookUpContentRuleList(
-                            forIdentifier: identifier
-                        ) { ruleList, _ in
-                            restored[index] = ruleList
-                            group.leave()
-                        }
+                self.loadRuleListsSequentially(identifiers: metadata.ruleListIdentifiers, index: 0, loaded: []) { [weak self] lists in
+                    guard let self = self else { return }
+                    
+                    if lists.count == metadata.ruleListIdentifiers.count {
+                        self.compiledListsBySource[sourceId] = lists
+                        self.restoreCosmeticScripts(metadata: metadata)
+                        self.applyRulesToAttachedWebViews()
+                    } else {
+                        self.compileSource(id: sourceId, completion: nil)
                     }
                 }
+            }
+        }
+    }
 
-                group.notify(queue: self.parseQueue) { [weak self] in
-                    guard let self = self else { return }
+    // 串行加载 WebKit 规则，防止并发读取导致底层崩溃
+    private func loadRuleListsSequentially(
+        identifiers: [String],
+        index: Int,
+        loaded: [WKContentRuleList],
+        completion: @escaping ([WKContentRuleList]) -> Void
+    ) {
+        guard index < identifiers.count else {
+            completion(loaded)
+            return
+        }
 
-                    let lists = restored.compactMap { $0 }
-
-                    guard lists.count == metadata.ruleListIdentifiers.count else {
-                        self.compileSource(id: sourceId, completion: nil)
-                        return
+        DispatchQueue.main.async {
+            WKContentRuleListStore.default().lookUpContentRuleList(forIdentifier: identifiers[index]) { [weak self] ruleList, _ in
+                self?.parseQueue.async {
+                    var nextLoaded = loaded
+                    if let rl = ruleList {
+                        nextLoaded.append(rl)
                     }
-
-                    self.compiledListsBySource[sourceId] = lists
-                    self.restoreCosmeticScripts(metadata: metadata)
-                    self.applyRulesToAttachedWebViews()
+                    self?.loadRuleListsSequentially(
+                        identifiers: identifiers,
+                        index: index + 1,
+                        loaded: nextLoaded,
+                        completion: completion
+                    )
                 }
             }
         }
@@ -425,24 +415,20 @@ final class AdBlockManager {
         }
 
         parseQueue.async { [weak self] in
-            guard let self = self else {
-                return
-            }
+            guard let self = self else { return }
 
             let payload = self.buildSourcePayload(text: text)
 
-            DispatchQueue.main.async {
-                self.setUpdateStatus(
-                    sourceId: sourceId,
-                    status: "正在编译规则…"
-                )
+            self.setUpdateStatus(
+                sourceId: sourceId,
+                status: "正在编译规则…"
+            )
 
-                self.compilePayload(
-                    payload,
-                    sourceId: sourceId,
-                    completion: completion
-                )
-            }
+            self.compilePayload(
+                payload,
+                sourceId: sourceId,
+                completion: completion
+            )
         }
     }
 
@@ -467,26 +453,22 @@ final class AdBlockManager {
 
             compiledListsBySource.removeValue(forKey: sourceId)
             
-            parseQueue.async { [weak self] in
-                self?.restoreCosmeticScripts(metadata: metadata)
-                DispatchQueue.main.async {
-                    self?.updatingSourceIds.remove(sourceId)
-                    self?.setUpdateStatus(sourceId: sourceId, status: nil)
-                    self?.applyRulesToAttachedWebViews()
+            restoreCosmeticScripts(metadata: metadata)
+            updatingSourceIds.remove(sourceId)
+            setUpdateStatus(sourceId: sourceId, status: nil)
+            applyRulesToAttachedWebViews()
 
-                    let message = payload.skippedRuleCount > 0
-                        ? "已更新，跳过 \(payload.skippedRuleCount) 条不兼容规则"
-                        : nil
+            let message = payload.skippedRuleCount > 0
+                ? "已更新，跳过 \(payload.skippedRuleCount) 条不兼容规则"
+                : nil
 
-                    completion?(true, message)
-                }
+            DispatchQueue.main.async {
+                completion?(true, message)
             }
             return
         }
 
-        let deadline = Date().addingTimeInterval(
-            maximumCompilationDuration
-        )
+        let deadline = Date().addingTimeInterval(maximumCompilationDuration)
 
         compileChunks(
             payload.networkChunks,
@@ -498,17 +480,14 @@ final class AdBlockManager {
             skippedChunks: 0,
             deadline: deadline
         ) { [weak self] lists, identifiers, skippedChunks in
-            guard let self = self else {
-                return
-            }
+            guard let self = self else { return }
 
             guard !lists.isEmpty else {
                 self.updatingSourceIds.remove(sourceId)
-                self.setUpdateStatus(
-                    sourceId: sourceId,
-                    status: nil
-                )
-                completion?(false, "规则编译超时或所有规则块均不兼容")
+                self.setUpdateStatus(sourceId: sourceId, status: nil)
+                DispatchQueue.main.async {
+                    completion?(false, "规则编译超时或所有规则块均不兼容")
+                }
                 return
             }
 
@@ -525,20 +504,18 @@ final class AdBlockManager {
 
             self.compiledListsBySource[sourceId] = lists
             
-            self.parseQueue.async { [weak self] in
-                self?.restoreCosmeticScripts(metadata: metadata)
-                DispatchQueue.main.async {
-                    self?.updatingSourceIds.remove(sourceId)
-                    self?.setUpdateStatus(sourceId: sourceId, status: nil)
-                    self?.applyRulesToAttachedWebViews()
+            self.restoreCosmeticScripts(metadata: metadata)
+            self.updatingSourceIds.remove(sourceId)
+            self.setUpdateStatus(sourceId: sourceId, status: nil)
+            self.applyRulesToAttachedWebViews()
 
-                    let skipped = metadata.skippedRuleCount
-                    let message = skipped > 0
-                        ? "已更新，跳过约 \(skipped) 条不兼容规则"
-                        : nil
+            let skipped = metadata.skippedRuleCount
+            let message = skipped > 0
+                ? "已更新，跳过约 \(skipped) 条不兼容规则"
+                : nil
 
-                    completion?(true, message)
-                }
+            DispatchQueue.main.async {
+                completion?(true, message)
             }
         }
     }
@@ -560,11 +537,7 @@ final class AdBlockManager {
         }
 
         guard Date() < deadline else {
-            completion(
-                lists,
-                identifiers,
-                skippedChunks + chunks.count - index
-            )
+            completion(lists, identifiers, skippedChunks + chunks.count - index)
             return
         }
 
@@ -578,7 +551,7 @@ final class AdBlockManager {
 
         func finish(_ ruleList: WKContentRuleList?) {
             gate.resolve {
-                DispatchQueue.main.async {
+                self.parseQueue.async {
                     var nextLists = lists
                     var nextIdentifiers = identifiers
                     var nextSkippedChunks = skippedChunks
@@ -605,24 +578,17 @@ final class AdBlockManager {
             }
         }
 
-        WKContentRuleListStore.default().compileContentRuleList(
-            forIdentifier: identifier,
-            encodedContentRuleList: chunks[index]
-        ) { ruleList, _ in
-            finish(ruleList)
+        DispatchQueue.main.async {
+            WKContentRuleListStore.default().compileContentRuleList(
+                forIdentifier: identifier,
+                encodedContentRuleList: chunks[index]
+            ) { ruleList, _ in
+                finish(ruleList)
+            }
         }
 
-        let remainingTime = max(
-            1,
-            min(
-                maximumSingleChunkDuration,
-                deadline.timeIntervalSinceNow
-            )
-        )
-
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + remainingTime
-        ) {
+        let remainingTime = max(1, min(maximumSingleChunkDuration, deadline.timeIntervalSinceNow))
+        DispatchQueue.main.asyncAfter(deadline: .now() + remainingTime) {
             finish(nil)
         }
     }
@@ -632,10 +598,7 @@ final class AdBlockManager {
         compiledListsBySource.removeValue(forKey: sourceId)
         cosmeticScriptsBySource.removeValue(forKey: sourceId)
         updatingSourceIds.remove(sourceId)
-        setUpdateStatus(
-            sourceId: sourceId,
-            status: nil
-        )
+        setUpdateStatus(sourceId: sourceId, status: nil)
         saveMetadata(metadataBySource)
         applyRulesToAttachedWebViews()
     }
@@ -659,6 +622,7 @@ final class AdBlockManager {
             let source = """
             (function() {
                 var rules = \(json);
+                var fallbackRules = [];
                 var styleId = '__simple_browser_adblock_style__';
                 var host = (location.hostname || '').toLowerCase();
 
@@ -675,6 +639,73 @@ final class AdBlockManager {
                     return false;
                 }
 
+                function hideElement(element) {
+                    if (!element) {
+                        return;
+                    }
+                    element.style.setProperty('display', 'none', 'important');
+                    element.style.setProperty('visibility', 'hidden', 'important');
+                    element.style.setProperty('pointer-events', 'none', 'important');
+                }
+
+                function hideBySelector(selector) {
+                    try {
+                        var elements = document.querySelectorAll(selector);
+                        for (var i = 0; i < elements.length; i++) {
+                            hideElement(elements[i]);
+                        }
+                        return true;
+                    } catch (_) {
+                        return false;
+                    }
+                }
+
+                function hideByHasFallback(selector) {
+                    var hasIndex = selector.indexOf(':has(');
+                    if (hasIndex < 0 || !selector.endsWith(')')) {
+                        return;
+                    }
+                    var outerSelector = selector.substring(0, hasIndex).trim() || '*';
+                    var innerSelector = selector.substring(hasIndex + 5, selector.length - 1).trim();
+                    if (!innerSelector) {
+                        return;
+                    }
+                    var outerElements;
+                    try {
+                        outerElements = document.querySelectorAll(outerSelector);
+                    } catch (_) {
+                        return;
+                    }
+                    for (var i = 0; i < outerElements.length; i++) {
+                        var outerElement = outerElements[i];
+                        var matched = false;
+                        try {
+                            if (innerSelector.startsWith('>')) {
+                                matched = outerElement.querySelector(':scope ' + innerSelector) !== null;
+                            } else {
+                                matched = outerElement.querySelector(innerSelector) !== null;
+                            }
+                        } catch (_) {
+                            matched = false;
+                        }
+                        if (matched) {
+                            hideElement(outerElement);
+                        }
+                    }
+                }
+
+                function applyFallbackRules() {
+                    for (var i = 0; i < fallbackRules.length; i++) {
+                        var rule = fallbackRules[i];
+                        if (!matchesDomain(rule)) {
+                            continue;
+                        }
+                        if (!hideBySelector(rule.selector)) {
+                            hideByHasFallback(rule.selector);
+                        }
+                    }
+                }
+
                 function insertRules() {
                     var style = document.getElementById(styleId);
                     if (!style) {
@@ -683,32 +714,56 @@ final class AdBlockManager {
                         style.type = 'text/css';
                         (document.head || document.documentElement).appendChild(style);
                     }
-
                     var sheet = style.sheet;
                     if (!sheet) {
                         return;
                     }
-
                     for (var i = 0; i < rules.length; i++) {
                         var rule = rules[i];
                         if (!matchesDomain(rule)) {
                             continue;
                         }
-
                         try {
                             sheet.insertRule(
                                 rule.selector + '{display:none !important;visibility:hidden !important;pointer-events:none !important;}',
                                 sheet.cssRules.length
                             );
                         } catch (_) {
+                            fallbackRules.push(rule);
                         }
                     }
+                    applyFallbackRules();
+                }
+
+                function scheduleFallbackApply() {
+                    var timer = null;
+                    var observer = new MutationObserver(function() {
+                        if (timer !== null) {
+                            return;
+                        }
+                        timer = setTimeout(function() {
+                            timer = null;
+                            applyFallbackRules();
+                        }, 300);
+                    });
+                    observer.observe(document.documentElement, {
+                        childList: true,
+                        subtree: true
+                    });
                 }
 
                 if (document.readyState === 'loading') {
-                    document.addEventListener('DOMContentLoaded', insertRules, { once: true });
+                    document.addEventListener('DOMContentLoaded', function() {
+                        insertRules();
+                        if (fallbackRules.length > 0) {
+                            scheduleFallbackApply();
+                        }
+                    }, { once: true });
                 } else {
                     insertRules();
+                    if (fallbackRules.length > 0) {
+                        scheduleFallbackApply();
+                    }
                 }
             })();
             """
@@ -754,29 +809,36 @@ final class AdBlockManager {
         var skippedRuleCount = 0
 
         text.enumerateLines { line, _ in
-            let result = self.parseRule(line)
+            // 引入 autoreleasepool 强制释放每行解析产生的临时内存，防止 OOM 闪退
+            autoreleasepool {
+                let result = self.parseRule(line)
 
-            if let networkRule = result.networkRule {
-                currentRules.append(networkRule)
-                ruleCount += 1
-
-                if currentRules.count >= self.nativeRuleChunkSize {
-                    if let json = self.jsonString(from: currentRules) {
-                        networkChunks.append(json)
-                    }
-                    currentRules.removeAll(keepingCapacity: true)
-                }
-            }
-
-            if !result.cosmeticRules.isEmpty {
-                for cosmeticRule in result.cosmeticRules {
+                if let networkRule = result.networkRule {
+                    currentRules.append(networkRule)
                     ruleCount += 1
-                    cosmeticRules.append(cosmeticRule)
-                }
-            }
 
-            if result.isUnsupported {
-                skippedRuleCount += 1
+                    if currentRules.count >= self.nativeRuleChunkSize {
+                        if let json = self.jsonString(from: currentRules) {
+                            networkChunks.append(json)
+                        }
+                        currentRules.removeAll(keepingCapacity: false)
+                    }
+                }
+
+                if !result.cosmeticRules.isEmpty {
+                    for cosmeticRule in result.cosmeticRules {
+                        ruleCount += 1
+                        if cosmeticRules.count < self.maximumCosmeticRulesPerSource {
+                            cosmeticRules.append(cosmeticRule)
+                        } else {
+                            skippedRuleCount += 1
+                        }
+                    }
+                }
+
+                if result.isUnsupported {
+                    skippedRuleCount += 1
+                }
             }
         }
 
@@ -807,6 +869,14 @@ final class AdBlockManager {
             )
         }
 
+        if line.contains("#@#") || line.contains("##+js") || line.contains("#%#") {
+            return AdBlockParsedLine(
+                networkRule: nil,
+                cosmeticRules: [],
+                isUnsupported: true
+            )
+        }
+
         if let range = line.range(of: "##") {
             let domainsText = String(line[..<range.lowerBound])
             let selectorsText = String(line[range.upperBound...])
@@ -815,14 +885,14 @@ final class AdBlockManager {
             let domains = normalizedDomains(from: domainsText).include
             let selectors = splitSelectorList(selectorsText)
 
-            let cosmeticRules = selectors.map { selector in
-                AdBlockCosmeticRule(domains: domains, selector: selector)
+            let cosmeticRules = selectors.compactMap { selector in
+                parseCosmeticRule(selector: selector, domains: domains)
             }
 
             return AdBlockParsedLine(
                 networkRule: nil,
                 cosmeticRules: cosmeticRules,
-                isUnsupported: false
+                isUnsupported: cosmeticRules.count != selectors.count
             )
         }
 
@@ -941,6 +1011,29 @@ final class AdBlockManager {
             ],
             cosmeticRules: [],
             isUnsupported: false
+        )
+    }
+
+    private func parseCosmeticRule(
+        selector: String,
+        domains: [String]
+    ) -> AdBlockCosmeticRule? {
+        let value = selector.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !value.isEmpty,
+              value.count <= 4096,
+              !value.contains("\u{0000}"),
+              !value.contains("{"),
+              !value.contains("}"),
+              !value.contains(";"),
+              !value.contains("<"),
+              !value.contains(">style") else {
+            return nil
+        }
+
+        return AdBlockCosmeticRule(
+            domains: domains,
+            selector: value
         )
     }
 
