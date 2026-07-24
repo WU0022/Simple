@@ -4,7 +4,7 @@ final class TabGridViewController: UIViewController, UICollectionViewDataSource,
     private var tabs: [TabItem]
     private var activeIndex: Int
     private var collectionView: UICollectionView!
-    private let addButton = TouchButton(type: .system)
+    private let addButton = TouchButton()
 
     var onSelectTab: ((Int) -> Void)?
     var onCloseTab: ((Int) -> Void)?
@@ -171,7 +171,7 @@ final class TabGridCell: UICollectionViewCell {
     private let headerView = UIView()
     private let thumbnailView = UIImageView()
     private let titleLabel = UILabel()
-    private let closeButton = TouchButton(type: .system)
+    private let closeButton = TouchButton()
 
     var onClose: (() -> Void)?
 
