@@ -20,7 +20,10 @@ final class AdBlockManager {
     private let customRulesKey = "adblock_custom_rules_v2"
     private let metadataKey = "adblock_compiled_metadata_v9"
     private let identifierPrefix = "SimpleBrowserAdBlockV9"
+    private let diagnosticKey = "adblock_unsupported_rules_v1"
+    
     private let nativeRuleChunkSize = 5000
+    private let maximumCosmeticRulesPerSource = 100000
     private let cosmeticScriptPayloadLimit = 180000
     private let maximumCompilationDuration: TimeInterval = 180
     private let maximumSingleChunkDuration: TimeInterval = 45
@@ -29,6 +32,7 @@ final class AdBlockManager {
     private var compiledListsBySource: [String: [WKContentRuleList]] = [:]
     private var cosmeticScriptsBySource: [String: [WKUserScript]] = [:]
     private var metadataBySource: [String: AdBlockCompiledSourceMetadata] = [:]
+    private var unsupportedRulesBySource: [String: [AdBlockUnsupportedRule]] = [:]
     private var updatingSourceIds = Set<String>()
     private var updateStatusBySource: [String: String] = [:]
     private let parseQueue = DispatchQueue(label: "SimpleBrowser.AdBlockParser", qos: .userInitiated)
@@ -49,6 +53,7 @@ final class AdBlockManager {
         }
 
         metadataBySource = loadMetadata()
+        unsupportedRulesBySource = loadUnsupportedRules()
         restorePersistedRules()
     }
 
@@ -139,6 +144,39 @@ final class AdBlockManager {
 
     func ruleCount(sourceId: String) -> Int {
         metadataBySource[sourceId]?.ruleCount ?? 0
+    }
+
+    func unsupportedRuleCount(sourceId: String) -> Int {
+        unsupportedRulesBySource[sourceId]?.count ?? 0
+    }
+
+    func unsupportedRulesText(sourceId: String) -> String {
+        let rules = unsupportedRulesBySource[sourceId] ?? []
+
+        guard !rules.isEmpty else {
+            return "没有检测到不兼容规则。"
+        }
+
+        return rules.enumerated().map { index, item in
+            let errorText = item.errorDescription.isEmpty ? "未返回具体错误" : item.errorDescription
+
+            return """
+            [\(index + 1)]
+            原始规则:
+            \(item.rawRule)
+
+            转换后的 WebKit 规则:
+            \(item.compiledJSON)
+
+            编译错误:
+            \(errorText)
+            """
+        }.joined(separator: "\n\n--------------------\n\n")
+    }
+
+    func clearUnsupportedRules(sourceId: String) {
+        unsupportedRulesBySource.removeValue(forKey: sourceId)
+        saveUnsupportedRules(unsupportedRulesBySource)
     }
 
     func updateStatus(sourceId: String) -> String? {
@@ -451,22 +489,30 @@ final class AdBlockManager {
 
             compiledListsBySource.removeValue(forKey: sourceId)
             
-            restoreCosmeticScripts(metadata: metadata)
-            updatingSourceIds.remove(sourceId)
-            setUpdateStatus(sourceId: sourceId, status: nil)
-            applyRulesToAttachedWebViews()
+            unsupportedRulesBySource[sourceId] = []
+            saveUnsupportedRules(unsupportedRulesBySource)
 
-            let message = payload.skippedRuleCount > 0
-                ? "已更新，跳过 \(payload.skippedRuleCount) 条不兼容规则"
-                : nil
+            parseQueue.async { [weak self] in
+                self?.restoreCosmeticScripts(metadata: metadata)
+                DispatchQueue.main.async {
+                    self?.updatingSourceIds.remove(sourceId)
+                    self?.setUpdateStatus(sourceId: sourceId, status: nil)
+                    self?.applyRulesToAttachedWebViews()
 
-            DispatchQueue.main.async {
-                completion?(true, message)
+                    let message = payload.skippedRuleCount > 0
+                        ? "已更新，跳过 \(payload.skippedRuleCount) 条不兼容规则"
+                        : nil
+
+                    completion?(true, message)
+                }
             }
             return
         }
 
         let deadline = Date().addingTimeInterval(maximumCompilationDuration)
+
+        unsupportedRulesBySource[sourceId] = []
+        saveUnsupportedRules(unsupportedRulesBySource)
 
         compileChunks(
             payload.networkChunks,
@@ -475,9 +521,8 @@ final class AdBlockManager {
             index: 0,
             lists: [],
             identifiers: [],
-            skippedChunks: 0,
             deadline: deadline
-        ) { [weak self] lists, identifiers, skippedChunks in
+        ) { [weak self] lists, identifiers in
             guard let self = self else { return }
 
             if lists.isEmpty && payload.cosmeticRules.isEmpty {
@@ -493,7 +538,7 @@ final class AdBlockManager {
                 sourceId: sourceId,
                 ruleListIdentifiers: identifiers,
                 ruleCount: payload.ruleCount,
-                skippedRuleCount: payload.skippedRuleCount + skippedChunks * self.nativeRuleChunkSize,
+                skippedRuleCount: payload.skippedRuleCount + self.unsupportedRuleCount(sourceId: sourceId),
                 cosmeticRules: payload.cosmeticRules
             )
 
@@ -502,40 +547,56 @@ final class AdBlockManager {
 
             self.compiledListsBySource[sourceId] = lists
             
-            self.restoreCosmeticScripts(metadata: metadata)
-            self.updatingSourceIds.remove(sourceId)
-            self.setUpdateStatus(sourceId: sourceId, status: nil)
-            self.applyRulesToAttachedWebViews()
+            self.parseQueue.async { [weak self] in
+                self?.restoreCosmeticScripts(metadata: metadata)
+                DispatchQueue.main.async {
+                    self?.updatingSourceIds.remove(sourceId)
+                    self?.setUpdateStatus(sourceId: sourceId, status: nil)
+                    self?.applyRulesToAttachedWebViews()
 
-            let skipped = metadata.skippedRuleCount
-            let message = skipped > 0
-                ? "已更新，跳过约 \(skipped) 条不兼容规则"
-                : nil
+                    let unsupportedCount = self?.unsupportedRuleCount(sourceId: sourceId) ?? 0
+                    let skipped = metadata.skippedRuleCount
 
-            DispatchQueue.main.async {
-                completion?(true, message)
+                    let message: String?
+                    if unsupportedCount > 0 {
+                        message = "已更新，\(unsupportedCount) 条规则未通过 WebKit 编译，可在规则管理页查看详情。"
+                    } else if skipped > 0 {
+                        message = "已更新，跳过 \(skipped) 条无法转换的规则。"
+                    } else {
+                        message = nil
+                    }
+
+                    completion?(true, message)
+                }
             }
         }
     }
 
     private func compileChunks(
-        _ chunks: [String],
+        _ chunks: [[AdBlockNetworkRule]],
         sourceId: String,
         version: String,
         index: Int,
         lists: [WKContentRuleList],
         identifiers: [String],
-        skippedChunks: Int,
         deadline: Date,
-        completion: @escaping ([WKContentRuleList], [String], Int) -> Void
+        completion: @escaping ([WKContentRuleList], [String]) -> Void
     ) {
         guard index < chunks.count else {
-            completion(lists, identifiers, skippedChunks)
+            completion(lists, identifiers)
             return
         }
 
         guard Date() < deadline else {
-            completion(lists, identifiers, skippedChunks + chunks.count - index)
+            let remainingRules = chunks[index...].flatMap { $0 }
+            for rule in remainingRules {
+                recordUnsupportedRule(
+                    sourceId: sourceId,
+                    rule: rule,
+                    error: "总编译超时，未提交给 WebKit 编译"
+                )
+            }
+            completion(lists, identifiers)
             return
         }
 
@@ -544,54 +605,117 @@ final class AdBlockManager {
             status: "正在编译规则 \(index + 1)/\(chunks.count)…"
         )
 
-        let identifier = "\(identifierPrefix).\(sourceId.replacingOccurrences(of: "-", with: "")).\(version).\(index)"
+        compileRuleGroup(
+            chunks[index],
+            sourceId: sourceId,
+            version: version,
+            groupIdentifier: "\(index)",
+            deadline: deadline
+        ) { [weak self] ruleLists, ruleIdentifiers in
+            guard let self = self else { return }
+            self.compileChunks(
+                chunks,
+                sourceId: sourceId,
+                version: version,
+                index: index + 1,
+                lists: lists + ruleLists,
+                identifiers: identifiers + ruleIdentifiers,
+                deadline: deadline,
+                completion: completion
+            )
+        }
+    }
+
+    private func compileRuleGroup(
+        _ rules: [AdBlockNetworkRule],
+        sourceId: String,
+        version: String,
+        groupIdentifier: String,
+        deadline: Date,
+        completion: @escaping ([WKContentRuleList], [String]) -> Void
+    ) {
+        guard !rules.isEmpty else {
+            completion([], [])
+            return
+        }
+
+        guard Date() < deadline else {
+            for rule in rules {
+                recordUnsupportedRule(
+                    sourceId: sourceId,
+                    rule: rule,
+                    error: "编译超时，未能定位"
+                )
+            }
+            completion([], [])
+            return
+        }
+
+        guard let json = jsonString(from: rules.map(\.compiledRule)) else {
+            for rule in rules {
+                recordUnsupportedRule(
+                    sourceId: sourceId,
+                    rule: rule,
+                    error: "无法生成 JSON"
+                )
+            }
+            completion([], [])
+            return
+        }
+
+        let identifier = "\(identifierPrefix).\(sourceId.replacingOccurrences(of: "-", with: "")).\(version).\(groupIdentifier)"
         let gate = AdBlockChunkCompilationGate()
 
-        var mutableChunks = chunks
-        let currentChunkJSON = mutableChunks[index]
-        mutableChunks[index] = ""
-
-        func finish(_ ruleList: WKContentRuleList?) {
+        func resolve(ruleList: WKContentRuleList?, error: Error?) {
             gate.resolve {
-                self.parseQueue.async {
-                    var nextLists = lists
-                    var nextIdentifiers = identifiers
-                    var nextSkippedChunks = skippedChunks
-
-                    if let ruleList = ruleList {
-                        nextLists.append(ruleList)
-                        nextIdentifiers.append(identifier)
-                    } else {
-                        nextSkippedChunks += 1
+                guard let ruleList = ruleList else {
+                    if rules.count == 1 {
+                        self.recordUnsupportedRule(
+                            sourceId: sourceId,
+                            rule: rules[0],
+                            error: self.compilerErrorDescription(error)
+                        )
+                        completion([], [])
+                        return
                     }
 
-                    self.compileChunks(
-                        mutableChunks,
+                    let middle = rules.count / 2
+                    let left = Array(rules[..<middle])
+                    let right = Array(rules[middle...])
+
+                    self.compileRuleGroup(
+                        left,
                         sourceId: sourceId,
                         version: version,
-                        index: index + 1,
-                        lists: nextLists,
-                        identifiers: nextIdentifiers,
-                        skippedChunks: nextSkippedChunks,
-                        deadline: deadline,
-                        completion: completion
-                    )
+                        groupIdentifier: "\(groupIdentifier)L",
+                        deadline: deadline
+                    ) { leftLists, leftIdentifiers in
+                        self.compileRuleGroup(
+                            right,
+                            sourceId: sourceId,
+                            version: version,
+                            groupIdentifier: "\(groupIdentifier)R",
+                            deadline: deadline
+                        ) { rightLists, rightIdentifiers in
+                            completion(
+                                leftLists + rightLists,
+                                leftIdentifiers + rightIdentifiers
+                            )
+                        }
+                    }
+                    return
                 }
+                completion([ruleList], [identifier])
             }
         }
 
         DispatchQueue.main.async {
             WKContentRuleListStore.default().compileContentRuleList(
                 forIdentifier: identifier,
-                encodedContentRuleList: currentChunkJSON
-            ) { ruleList, _ in
-                finish(ruleList)
+                encodedContentRuleList: json
+            ) { ruleList, error in
+                resolve(ruleList: ruleList, error: error)
             }
-        }
-
-        let remainingTime = max(1, min(maximumSingleChunkDuration, deadline.timeIntervalSinceNow))
-        DispatchQueue.main.asyncAfter(deadline: .now() + remainingTime) {
-            finish(nil)
         }
     }
 
@@ -599,9 +723,11 @@ final class AdBlockManager {
         metadataBySource.removeValue(forKey: sourceId)
         compiledListsBySource.removeValue(forKey: sourceId)
         cosmeticScriptsBySource.removeValue(forKey: sourceId)
+        unsupportedRulesBySource.removeValue(forKey: sourceId)
         updatingSourceIds.remove(sourceId)
         setUpdateStatus(sourceId: sourceId, status: nil)
         saveMetadata(metadataBySource)
+        saveUnsupportedRules(unsupportedRulesBySource)
         applyRulesToAttachedWebViews()
     }
 
@@ -804,8 +930,8 @@ final class AdBlockManager {
     }
 
     private func buildSourcePayload(text: String) -> AdBlockSourcePayload {
-        var networkChunks: [String] = []
-        var currentRules: [[String: Any]] = []
+        var networkChunks: [[AdBlockNetworkRule]] = []
+        var currentRules: [AdBlockNetworkRule] = []
         var cosmeticRules: [AdBlockCosmeticRule] = []
         var ruleCount = 0
         var skippedRuleCount = 0
@@ -815,21 +941,28 @@ final class AdBlockManager {
                 let result = self.parseRule(line)
 
                 if let networkRule = result.networkRule {
-                    currentRules.append(networkRule)
+                    currentRules.append(
+                        AdBlockNetworkRule(
+                            rawRule: line,
+                            compiledRule: networkRule
+                        )
+                    )
                     ruleCount += 1
 
                     if currentRules.count >= self.nativeRuleChunkSize {
-                        if let json = self.jsonString(from: currentRules) {
-                            networkChunks.append(json)
-                        }
+                        networkChunks.append(currentRules)
                         currentRules.removeAll(keepingCapacity: false)
                     }
                 }
 
                 if !result.cosmeticRules.isEmpty {
                     for cosmeticRule in result.cosmeticRules {
-                        ruleCount += 1
-                        cosmeticRules.append(cosmeticRule)
+                        if cosmeticRules.count < self.maximumCosmeticRulesPerSource {
+                            cosmeticRules.append(cosmeticRule)
+                            ruleCount += 1
+                        } else {
+                            skippedRuleCount += 1
+                        }
                     }
                 }
 
@@ -839,9 +972,8 @@ final class AdBlockManager {
             }
         }
 
-        if !currentRules.isEmpty,
-           let json = jsonString(from: currentRules) {
-            networkChunks.append(json)
+        if !currentRules.isEmpty {
+            networkChunks.append(currentRules)
         }
 
         return AdBlockSourcePayload(
@@ -972,7 +1104,6 @@ final class AdBlockManager {
         let filter = urlFilterPattern(from: rawPattern)
 
         guard !filter.isEmpty,
-              filter.count < 256,
               (try? NSRegularExpression(pattern: filter)) != nil else {
             return AdBlockParsedLine(
                 networkRule: nil,
@@ -1185,6 +1316,65 @@ final class AdBlockManager {
 
         UserDefaults.standard.set(data, forKey: metadataKey)
     }
+
+    private func recordUnsupportedRule(
+        sourceId: String,
+        rule: AdBlockNetworkRule,
+        error: String
+    ) {
+        let compiledJSON = jsonString(from: [rule.compiledRule]) ?? ""
+
+        let item = AdBlockUnsupportedRule(
+            rawRule: rule.rawRule,
+            compiledJSON: compiledJSON,
+            errorDescription: error
+        )
+
+        var items = unsupportedRulesBySource[sourceId] ?? []
+
+        if !items.contains(where: { $0.rawRule == item.rawRule }) {
+            items.append(item)
+            unsupportedRulesBySource[sourceId] = items
+            saveUnsupportedRules(unsupportedRulesBySource)
+        }
+    }
+
+    private func compilerErrorDescription(_ error: Error?) -> String {
+        guard let error = error else {
+            return "WebKit 未返回具体错误"
+        }
+
+        let nsError = error as NSError
+        var parts: [String] = [nsError.localizedDescription]
+
+        if !nsError.userInfo.isEmpty {
+            parts.append("userInfo: \(nsError.userInfo)")
+        }
+
+        return parts.joined(separator: "\n")
+    }
+
+    private func loadUnsupportedRules() -> [String: [AdBlockUnsupportedRule]] {
+        guard let data = UserDefaults.standard.data(forKey: diagnosticKey),
+              let items = try? JSONDecoder().decode(
+                [String: [AdBlockUnsupportedRule]].self,
+                from: data
+              ) else {
+            return [:]
+        }
+
+        return items
+    }
+
+    private func saveUnsupportedRules(
+        _ rules: [String: [AdBlockUnsupportedRule]]
+    ) {
+        guard let data = try? JSONEncoder().encode(rules) else {
+            return
+        }
+
+        UserDefaults.standard.set(data, forKey: diagnosticKey)
+    }
 }
 
 struct AdBlockCompiledSourceMetadata: Codable {
@@ -1196,7 +1386,7 @@ struct AdBlockCompiledSourceMetadata: Codable {
 }
 
 private struct AdBlockSourcePayload {
-    var networkChunks: [String]
+    var networkChunks: [[AdBlockNetworkRule]]
     var cosmeticRules: [AdBlockCosmeticRule]
     var ruleCount: Int
     var skippedRuleCount: Int
@@ -1206,6 +1396,17 @@ private struct AdBlockParsedLine {
     var networkRule: [String: Any]?
     var cosmeticRules: [AdBlockCosmeticRule]
     var isUnsupported: Bool
+}
+
+private struct AdBlockNetworkRule {
+    var rawRule: String
+    var compiledRule: [String: Any]
+}
+
+private struct AdBlockUnsupportedRule: Codable {
+    var rawRule: String
+    var compiledJSON: String
+    var errorDescription: String
 }
 
 private final class AdBlockChunkCompilationGate {
@@ -1230,6 +1431,37 @@ private final class AdBlockChunkCompilationGate {
 struct AdBlockCosmeticRule: Codable {
     var domains: [String]
     var selector: String
+}
+
+final class UnsupportedRulesViewController: UIViewController {
+    private let textView = UITextView()
+    private let text: String
+
+    init(text: String) {
+        self.text = text
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        title = "不兼容规则诊断"
+        view.backgroundColor = .systemBackground
+
+        textView.translatesAutoresizingMaskIntoConstraints = false
+        textView.isEditable = false
+        textView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        textView.text = text
+        view.addSubview(textView)
+
+        NSLayoutConstraint.activate([
+            textView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            textView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
+            textView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -8),
+            textView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+    }
 }
 
 final class AdBlockManagerViewController: UIViewController, UITableViewDataSource, UITableViewDelegate {
@@ -1417,13 +1649,34 @@ final class AdBlockManagerViewController: UIViewController, UITableViewDataSourc
                 showAddSubscriptionAlert()
             }
         } else if indexPath.section == 2 {
-            let customVC = CustomRuleEditorViewController()
-            customVC.onSaved = { [weak self] in
-                self?.loadData()
-                self?.onRulesChanged?()
+            let sourceId = AdBlockManager.customSourceId
+            let unsupportedCount = AdBlockManager.shared.unsupportedRuleCount(sourceId: sourceId)
+
+            if unsupportedCount > 0 {
+                let alert = UIAlertController(title: "自定义规则", message: nil, preferredStyle: .actionSheet)
+                alert.addAction(UIAlertAction(title: "编辑规则", style: .default) { [weak self] _ in
+                    self?.openCustomRuleEditor()
+                })
+                alert.addAction(UIAlertAction(title: "查看不兼容规则 (\(unsupportedCount))", style: .default) { [weak self] _ in
+                    let text = AdBlockManager.shared.unsupportedRulesText(sourceId: sourceId)
+                    let vc = UnsupportedRulesViewController(text: text)
+                    self?.navigationController?.pushViewController(vc, animated: true)
+                })
+                alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+                present(alert, animated: true)
+            } else {
+                openCustomRuleEditor()
             }
-            navigationController?.pushViewController(customVC, animated: true)
         }
+    }
+
+    private func openCustomRuleEditor() {
+        let customVC = CustomRuleEditorViewController()
+        customVC.onSaved = { [weak self] in
+            self?.loadData()
+            self?.onRulesChanged?()
+        }
+        navigationController?.pushViewController(customVC, animated: true)
     }
 
     func tableView(
@@ -1528,6 +1781,15 @@ final class AdBlockManagerViewController: UIViewController, UITableViewDataSourc
                 self.onRulesChanged?()
             }
         })
+
+        let unsupportedCount = AdBlockManager.shared.unsupportedRuleCount(sourceId: subscription.id)
+        if unsupportedCount > 0 {
+            alert.addAction(UIAlertAction(title: "查看不兼容规则 (\(unsupportedCount))", style: .default) { [weak self] _ in
+                let text = AdBlockManager.shared.unsupportedRulesText(sourceId: subscription.id)
+                let vc = UnsupportedRulesViewController(text: text)
+                self?.navigationController?.pushViewController(vc, animated: true)
+            })
+        }
 
         alert.addAction(UIAlertAction(title: "删除订阅", style: .destructive) { [weak self] _ in
             guard let self = self else { return }
