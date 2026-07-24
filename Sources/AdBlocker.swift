@@ -19,9 +19,9 @@ struct AdBlockCompiledSourceMetadata: Codable {
 }
 
 private struct AdBlockSourcePayload {
-    var ruleBatches: [[[String: Any]]]
+    var chunkJSONStrings: [String]
     var cssScript: String
-    var domRuleCount: Int
+    var ruleCount: Int
 }
 
 private struct AdBlockParsedLine {
@@ -215,50 +215,52 @@ final class AdBlockManager {
                 return
             }
 
-            let text = String(data: data, encoding: .utf8)
-                ?? String(data: data, encoding: .ascii)
-                ?? String(data: data, encoding: .isoLatin1)
-                ?? ""
+            self.workQueue.async {
+                let text = String(data: data, encoding: .utf8)
+                    ?? String(data: data, encoding: .ascii)
+                    ?? String(data: data, encoding: .isoLatin1)
+                    ?? ""
 
-            guard !text.isEmpty else {
-                DispatchQueue.main.async {
-                    self.updatingSourceIds.remove(subscription.id)
-                    completion(false, 0, "文本解码失败")
-                }
-                return
-            }
-
-            let fileURL = self.subscriptionFileURL(id: subscription.id)
-
-            do {
-                try text.write(to: fileURL, atomically: true, encoding: .utf8)
-            } catch {
-                DispatchQueue.main.async {
-                    self.updatingSourceIds.remove(subscription.id)
-                    completion(false, 0, "保存规则文件失败")
-                }
-                return
-            }
-
-            self.compileSource(id: subscription.id) { success, _ in
-                DispatchQueue.main.async {
-                    self.updatingSourceIds.remove(subscription.id)
-
-                    guard success else {
-                        completion(false, 0, "规则已下载，但未成功生成可挂载的规则集")
-                        return
+                guard !text.isEmpty else {
+                    DispatchQueue.main.async {
+                        self.updatingSourceIds.remove(subscription.id)
+                        completion(false, 0, "文本解码失败")
                     }
+                    return
+                }
 
-                    let compiledRules = self.ruleCount(sourceId: subscription.id)
+                let fileURL = self.subscriptionFileURL(id: subscription.id)
 
-                    var subscriptions = self.loadSubscriptions()
-                    if let index = subscriptions.firstIndex(where: { $0.id == subscription.id }) {
-                        subscriptions[index].lastUpdated = Date()
-                        subscriptions[index].ruleCount = compiledRules
-                        self.saveSubscriptions(subscriptions)
+                do {
+                    try text.write(to: fileURL, atomically: true, encoding: .utf8)
+                } catch {
+                    DispatchQueue.main.async {
+                        self.updatingSourceIds.remove(subscription.id)
+                        completion(false, 0, "保存规则文件失败")
                     }
+                    return
+                }
 
-                    completion(true, compiledRules, nil)
+                self.compileSource(id: subscription.id) { success, compileErr in
+                    DispatchQueue.main.async {
+                        self.updatingSourceIds.remove(subscription.id)
+
+                        guard success else {
+                            completion(false, 0, compileErr ?? "规则无法成功生成挂载表")
+                            return
+                        }
+
+                        let compiledRules = self.ruleCount(sourceId: subscription.id)
+
+                        var subscriptions = self.loadSubscriptions()
+                        if let index = subscriptions.firstIndex(where: { $0.id == subscription.id }) {
+                            subscriptions[index].lastUpdated = Date()
+                            subscriptions[index].ruleCount = compiledRules
+                            self.saveSubscriptions(subscriptions)
+                        }
+
+                        completion(true, compiledRules, nil)
+                    }
                 }
             }
         }.resume()
@@ -347,16 +349,33 @@ final class AdBlockManager {
         id sourceId: String,
         completion: ((Bool, String?) -> Void)?
     ) {
-        guard let text = sourceText(id: sourceId) else {
-            removeSource(id: sourceId)
-            completion?(true, nil)
-            return
+        updatingSourceIds.insert(sourceId)
+
+        var completed = false
+        let safeCompletion: (Bool, String?) -> Void = { [weak self] success, err in
+            guard !completed else { return }
+            completed = true
+            DispatchQueue.main.async {
+                self?.updatingSourceIds.remove(sourceId)
+                completion?(success, err)
+            }
         }
 
-        updatingSourceIds.insert(sourceId)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 45.0) {
+            safeCompletion(false, "编译规则超时")
+        }
 
         workQueue.async { [weak self] in
             guard let self = self else {
+                safeCompletion(false, "已释放")
+                return
+            }
+
+            guard let text = self.sourceText(id: sourceId) else {
+                DispatchQueue.main.async {
+                    self.removeSource(id: sourceId)
+                    safeCompletion(true, nil)
+                }
                 return
             }
 
@@ -366,7 +385,7 @@ final class AdBlockManager {
                 self.compilePayload(
                     payload,
                     sourceId: sourceId,
-                    completion: completion
+                    completion: safeCompletion
                 )
             }
         }
@@ -380,24 +399,48 @@ final class AdBlockManager {
         let oldMetadata = metadataBySource[sourceId]
         let newVersion = UUID().uuidString
 
-        compileRuleBatches(
-            payload.ruleBatches,
+        guard !payload.chunkJSONStrings.isEmpty else {
+            let metadata = AdBlockCompiledSourceMetadata(
+                sourceId: sourceId,
+                version: newVersion,
+                chunkCount: 0,
+                ruleCount: payload.ruleCount,
+                cssScript: payload.cssScript
+            )
+
+            metadataBySource[sourceId] = metadata
+            saveMetadata(metadataBySource)
+
+            compiledListsBySource.removeValue(forKey: sourceId)
+            restoreCSSScript(metadata: metadata)
+            updatingSourceIds.remove(sourceId)
+
+            if let oldMetadata = oldMetadata {
+                removeStoredRuleLists(metadata: oldMetadata)
+            }
+
+            applyRulesToAttachedWebViews()
+            completion?(true, nil)
+            return
+        }
+
+        compileChunks(
+            payload.chunkJSONStrings,
             sourceId: sourceId,
             version: newVersion,
-            batchIndex: 0,
-            nextRuleListIndex: 0,
-            lists: [],
-            activeRuleCount: 0
-        ) { [weak self] lists, activeRuleCount, _ in
+            index: 0,
+            compiledLists: []
+        ) { [weak self] lists in
             guard let self = self else {
+                completion?(false, "解析器被释放")
                 return
             }
 
-            let totalActiveRuleCount = activeRuleCount + payload.domRuleCount
+            let totalActiveRuleCount = payload.ruleCount
 
-            guard totalActiveRuleCount > 0 else {
+            guard !lists.isEmpty || !payload.cssScript.isEmpty else {
                 self.updatingSourceIds.remove(sourceId)
-                completion?(false, "解析后未发现可用规则")
+                completion?(false, "未能成功编译有效规则")
                 return
             }
 
@@ -425,58 +468,16 @@ final class AdBlockManager {
         }
     }
 
-    private func compileRuleBatches(
-        _ ruleBatches: [[[String: Any]]],
+    private func compileChunks(
+        _ jsonStrings: [String],
         sourceId: String,
         version: String,
-        batchIndex: Int,
-        nextRuleListIndex: Int,
-        lists: [WKContentRuleList],
-        activeRuleCount: Int,
-        completion: @escaping ([WKContentRuleList], Int, Int) -> Void
+        index: Int,
+        compiledLists: [WKContentRuleList],
+        completion: @escaping ([WKContentRuleList]) -> Void
     ) {
-        guard batchIndex < ruleBatches.count else {
-            completion(lists, activeRuleCount, nextRuleListIndex)
-            return
-        }
-
-        compileRuleBatch(
-            ruleBatches[batchIndex],
-            sourceId: sourceId,
-            version: version,
-            ruleListIndex: nextRuleListIndex
-        ) { [weak self] compiledLists, compiledRuleCount, nextIndex in
-            guard let self = self else {
-                return
-            }
-
-            self.compileRuleBatches(
-                ruleBatches,
-                sourceId: sourceId,
-                version: version,
-                batchIndex: batchIndex + 1,
-                nextRuleListIndex: nextIndex,
-                lists: lists + compiledLists,
-                activeRuleCount: activeRuleCount + compiledRuleCount,
-                completion: completion
-            )
-        }
-    }
-
-    private func compileRuleBatch(
-        _ rules: [[String: Any]],
-        sourceId: String,
-        version: String,
-        ruleListIndex: Int,
-        completion: @escaping ([WKContentRuleList], Int, Int) -> Void
-    ) {
-        guard !rules.isEmpty else {
-            completion([], 0, ruleListIndex)
-            return
-        }
-
-        guard let json = jsonString(from: rules) else {
-            completion([], 0, ruleListIndex + 1)
+        guard index < jsonStrings.count else {
+            completion(compiledLists)
             return
         }
 
@@ -484,47 +485,28 @@ final class AdBlockManager {
             forIdentifier: ruleListIdentifier(
                 sourceId: sourceId,
                 version: version,
-                index: ruleListIndex
+                index: compiledLists.count
             ),
-            encodedContentRuleList: json
+            encodedContentRuleList: jsonStrings[index]
         ) { [weak self] ruleList, _ in
             guard let self = self else {
+                completion(compiledLists)
                 return
             }
 
+            var nextLists = compiledLists
             if let ruleList = ruleList {
-                completion([ruleList], rules.count, ruleListIndex + 1)
-                return
+                nextLists.append(ruleList)
             }
 
-            if rules.count == 1 {
-                completion([], 0, ruleListIndex + 1)
-                return
-            }
-
-            let middle = rules.count / 2
-            let left = Array(rules[..<middle])
-            let right = Array(rules[middle...])
-
-            self.compileRuleBatch(
-                left,
+            self.compileChunks(
+                jsonStrings,
                 sourceId: sourceId,
                 version: version,
-                ruleListIndex: ruleListIndex
-            ) { leftLists, leftCount, leftNextIndex in
-                self.compileRuleBatch(
-                    right,
-                    sourceId: sourceId,
-                    version: version,
-                    ruleListIndex: leftNextIndex
-                ) { rightLists, rightCount, rightNextIndex in
-                    completion(
-                        leftLists + rightLists,
-                        leftCount + rightCount,
-                        rightNextIndex
-                    )
-                }
-            }
+                index: index + 1,
+                compiledLists: nextLists,
+                completion: completion
+            )
         }
     }
 
@@ -576,21 +558,28 @@ final class AdBlockManager {
     }
 
     private func buildSourcePayload(text: String) -> AdBlockSourcePayload {
-        var ruleBatches: [[[String: Any]]] = []
+        var chunks: [String] = []
         var currentRules: [[String: Any]] = []
         var domHideTable: [String: Set<String>] = [:]
         var domExceptionTable: [String: Set<String>] = [:]
         var domStyleTable: [String: [String: String]] = [:]
-        var domRuleCount = 0
+        var ruleCount = 0
+        let maxRulesLimit = 50000
 
-        for line in text.components(separatedBy: .newlines) {
+        let lines = text.components(separatedBy: .newlines)
+
+        for line in lines {
+            if ruleCount >= maxRulesLimit { break }
+
             let result = parseABPLine(line)
 
             for rule in result.networkRules {
                 currentRules.append(rule)
 
-                if currentRules.count >= 3000 {
-                    ruleBatches.append(currentRules)
+                if currentRules.count >= 4000 {
+                    if let json = jsonString(from: currentRules) {
+                        chunks.append(json)
+                    }
                     currentRules.removeAll(keepingCapacity: true)
                 }
             }
@@ -605,33 +594,29 @@ final class AdBlockManager {
 
             for (domain, styles) in result.domCustomStyles {
                 var currentStyles = domStyleTable[domain, default: [:]]
-
                 for (selector, css) in styles {
                     currentStyles[selector] = css
                 }
-
                 domStyleTable[domain] = currentStyles
             }
 
-            if !result.domHideSelectors.isEmpty ||
-                !result.domExceptionSelectors.isEmpty ||
-                !result.domCustomStyles.isEmpty {
-                domRuleCount += 1
+            if !result.networkRules.isEmpty || !result.domHideSelectors.isEmpty || !result.domExceptionSelectors.isEmpty || !result.domCustomStyles.isEmpty {
+                ruleCount += 1
             }
         }
 
-        if !currentRules.isEmpty {
-            ruleBatches.append(currentRules)
+        if !currentRules.isEmpty, let json = jsonString(from: currentRules) {
+            chunks.append(json)
         }
 
         return AdBlockSourcePayload(
-            ruleBatches: ruleBatches,
+            chunkJSONStrings: chunks,
             cssScript: domHidingScript(
                 hideTable: domHideTable,
                 exceptionTable: domExceptionTable,
                 styleTable: domStyleTable
             ),
-            domRuleCount: domRuleCount
+            ruleCount: ruleCount
         )
     }
 
