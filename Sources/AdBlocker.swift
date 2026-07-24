@@ -15,6 +15,7 @@ final class AdBlockManager {
     private let enabledKey = "adblock_enabled_v1"
     private let subscriptionsKey = "adblock_subscriptions_v1"
     private let customRulesKey = "adblock_custom_rules_v1"
+    private let cachedCSSTextKey = "adblock_cached_css_text_v1"
     private let ruleListIdentifier = "SimpleBrowserAdBlockRules"
 
     private(set) var compiledRuleList: WKContentRuleList?
@@ -35,6 +36,9 @@ final class AdBlockManager {
     private init() {
         if UserDefaults.standard.object(forKey: enabledKey) == nil {
             UserDefaults.standard.set(true, forKey: enabledKey)
+        }
+        if let cachedCSS = UserDefaults.standard.string(forKey: cachedCSSTextKey), !cachedCSS.isEmpty {
+            self.injectedCSSUserScript = WKUserScript(source: cachedCSS, injectionTime: .atDocumentStart, forMainFrameOnly: false)
         }
         initDefaultSubscriptionsIfNeeded()
         loadCompiledRules()
@@ -75,6 +79,19 @@ final class AdBlockManager {
             subs[idx].urlString = urlString
             saveSubscriptions(subs)
             recompileRules()
+        }
+    }
+
+    func deleteSubscription(id: String) {
+        var subs = loadSubscriptions()
+        subs.removeAll { $0.id == id }
+        saveSubscriptions(subs)
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            let fileURL = self.getSubscriptionFileURL(id: id)
+            try? FileManager.default.removeItem(at: fileURL)
+            self.recompileRules()
         }
     }
 
@@ -140,15 +157,49 @@ final class AdBlockManager {
         }
     }
 
-    func fetchSubscription(_ sub: AdBlockSubscription, completion: @escaping (Bool, Int) -> Void) {
+    func fetchSubscription(_ sub: AdBlockSubscription, completion: @escaping (Bool, Bool, Int, String?) -> Void) {
         guard let url = URL(string: sub.urlString) else {
-            completion(false, 0)
+            completion(false, false, 0, "无效的地址")
             return
         }
 
-        let task = URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
-            guard let self = self, let data = data, let text = String(data: data, encoding: .utf8), !text.isEmpty else {
-                DispatchQueue.main.async { completion(false, 0) }
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 15.0)
+        request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
+
+        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            guard let self = self else { return }
+
+            if let error = error {
+                DispatchQueue.main.async {
+                    completion(false, false, 0, error.localizedDescription)
+                }
+                return
+            }
+
+            guard let httpResp = response as? HTTPURLResponse, (200...299).contains(httpResp.statusCode) else {
+                let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+                DispatchQueue.main.async {
+                    completion(false, false, 0, "HTTP 状态码: \(code)")
+                }
+                return
+            }
+
+            guard let data = data, !data.isEmpty else {
+                DispatchQueue.main.async {
+                    completion(false, false, 0, "数据内容为空")
+                }
+                return
+            }
+
+            let text = String(data: data, encoding: .utf8)
+                ?? String(data: data, encoding: .ascii)
+                ?? String(data: data, encoding: .isoLatin1)
+                ?? ""
+
+            guard !text.isEmpty else {
+                DispatchQueue.main.async {
+                    completion(false, false, 0, "无法解析文本")
+                }
                 return
             }
 
@@ -167,36 +218,43 @@ final class AdBlockManager {
                 self.saveSubscriptions(subs)
             }
 
-            self.recompileRules { success in
+            self.recompileRules { success, compileErr in
                 DispatchQueue.main.async {
-                    completion(success, lineCount)
+                    completion(true, success, lineCount, compileErr)
                 }
             }
         }
         task.resume()
     }
 
-    func recompileRules(completion: ((Bool) -> Void)? = nil) {
-        let (jsonString, jsScriptString, totalRules) = generateWebKitRulesAndJSScript()
-        self.compiledCount = totalRules
+    func recompileRules(completion: ((Bool, String?) -> Void)? = nil) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            let (jsonString, jsScriptString, totalRules) = self.generateWebKitRulesAndJSScript()
 
-        if !jsScriptString.isEmpty {
-            self.injectedCSSUserScript = WKUserScript(source: jsScriptString, injectionTime: .atDocumentStart, forMainFrameOnly: false)
-        } else {
-            self.injectedCSSUserScript = nil
-        }
-
-        WKContentRuleListStore.default().compileContentRuleList(forIdentifier: ruleListIdentifier, encodedContentRuleList: jsonString) { [weak self] ruleList, error in
             DispatchQueue.main.async {
-                if let ruleList = ruleList {
-                    self?.compiledRuleList = ruleList
-                    self?.lastErrorDescription = nil
-                    self?.applyRulesToAttachedWebViews()
-                    completion?(true)
+                self.compiledCount = totalRules
+
+                if !jsScriptString.isEmpty {
+                    UserDefaults.standard.set(jsScriptString, forKey: self.cachedCSSTextKey)
+                    self.injectedCSSUserScript = WKUserScript(source: jsScriptString, injectionTime: .atDocumentStart, forMainFrameOnly: false)
                 } else {
-                    self?.lastErrorDescription = error?.localizedDescription ?? "规则编译失败"
-                    self?.applyRulesToAttachedWebViews()
-                    completion?(false)
+                    UserDefaults.standard.removeObject(forKey: self.cachedCSSTextKey)
+                    self.injectedCSSUserScript = nil
+                }
+
+                WKContentRuleListStore.default().compileContentRuleList(forIdentifier: self.ruleListIdentifier, encodedContentRuleList: jsonString) { ruleList, error in
+                    if let ruleList = ruleList {
+                        self.compiledRuleList = ruleList
+                        self.lastErrorDescription = nil
+                        self.applyRulesToAttachedWebViews()
+                        completion?(true, nil)
+                    } else {
+                        let errStr = error?.localizedDescription ?? "规则编译失败"
+                        self.lastErrorDescription = errStr
+                        self.applyRulesToAttachedWebViews()
+                        completion?(false, errStr)
+                    }
                 }
             }
         }
@@ -211,9 +269,10 @@ final class AdBlockManager {
         var jsonRules: [[String: Any]] = []
         var domainCSSTable: [String: Set<String>] = [:]
         var totalRuleCount = 0
+        let maxRulesLimit = 25000
 
         let processLine: (String) -> Void = { [weak self] line in
-            guard let self = self else { return }
+            guard let self = self, totalRuleCount < maxRulesLimit else { return }
             let (rules, domCSSDict) = self.parseABPLine(line)
             jsonRules.append(contentsOf: rules)
 
@@ -243,6 +302,7 @@ final class AdBlockManager {
             if let text = try? String(contentsOf: fileURL, encoding: .utf8) {
                 let lines = text.components(separatedBy: .newlines)
                 for line in lines {
+                    if totalRuleCount >= maxRulesLimit { break }
                     processLine(line)
                 }
             }
@@ -596,7 +656,7 @@ final class AdBlockManagerViewController: UIViewController, UITableViewDataSourc
                 cell.accessoryType = .none
             }
         } else {
-            let status = AdBlockManager.shared.lastErrorDescription == nil ? "已成功编译加载" : "编译失败: \(AdBlockManager.shared.lastErrorDescription!)"
+            let status = AdBlockManager.shared.lastErrorDescription == nil ? "已成功编译加载" : "编译提示: \(AdBlockManager.shared.lastErrorDescription!)"
             cell.textLabel?.text = "编辑自定义过滤规则"
             cell.detailTextLabel?.text = "有效规则: \(AdBlockManager.shared.compiledCount) 条 | \(status)"
             cell.accessoryType = .disclosureIndicator
@@ -674,12 +734,19 @@ final class AdBlockManagerViewController: UIViewController, UITableViewDataSourc
             let hud = UIAlertController(title: nil, message: "正在下载更新规则...", preferredStyle: .alert)
             self?.present(hud, animated: true)
 
-            AdBlockManager.shared.fetchSubscription(sub) { success, count in
+            AdBlockManager.shared.fetchSubscription(sub) { downloadSuccess, compileSuccess, count, errorMsg in
                 hud.dismiss(animated: true) {
-                    let msg = success ? "更新成功，已加载 \(count) 条规则" : "更新失败，请检查网络链接"
+                    let msg: String
+                    if !downloadSuccess {
+                        msg = "下载失败：\(errorMsg ?? "请检查网络或代理")"
+                    } else if !compileSuccess {
+                        msg = "规则已下载 (\(count) 条)，但编译提示：\(errorMsg ?? "超出限制或语法错误")"
+                    } else {
+                        msg = "更新成功，已加载 \(count) 条规则"
+                    }
                     let res = UIAlertController(title: nil, message: msg, preferredStyle: .alert)
                     self?.present(res, animated: true)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                         res.dismiss(animated: true)
                     }
                     self?.loadData()
@@ -690,10 +757,8 @@ final class AdBlockManagerViewController: UIViewController, UITableViewDataSourc
 
         alert.addAction(UIAlertAction(title: "删除订阅", style: .destructive) { [weak self] _ in
             guard let self = self else { return }
-            var subs = self.subscriptions
-            subs.removeAll { $0.id == sub.id }
-            AdBlockManager.shared.saveSubscriptions(subs)
-            AdBlockManager.shared.recompileRules()
+            self.subscriptions.removeAll { $0.id == sub.id }
+            AdBlockManager.shared.deleteSubscription(id: sub.id)
             self.loadData()
             self.onRulesChanged?()
         })
@@ -725,7 +790,7 @@ final class AdBlockManagerViewController: UIViewController, UITableViewDataSourc
             AdBlockManager.shared.saveSubscriptions(subs)
             self?.loadData()
 
-            AdBlockManager.shared.fetchSubscription(newSub) { _, _ in
+            AdBlockManager.shared.fetchSubscription(newSub) { _, _, _, _ in
                 self?.loadData()
                 self?.onRulesChanged?()
             }
