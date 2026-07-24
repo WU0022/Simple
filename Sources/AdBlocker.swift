@@ -112,8 +112,12 @@ final class AdBlockManager {
     private func loadCompiledRules() {
         WKContentRuleListStore.default().lookUpContentRuleList(forIdentifier: ruleListIdentifier) { [weak self] ruleList, _ in
             DispatchQueue.main.async {
-                self?.compiledRuleList = ruleList
-                self?.applyRulesToAttachedWebViews()
+                if let ruleList = ruleList {
+                    self?.compiledRuleList = ruleList
+                    self?.applyRulesToAttachedWebViews()
+                } else {
+                    self?.recompileRules()
+                }
             }
         }
     }
@@ -138,7 +142,10 @@ final class AdBlockManager {
             let fileURL = self.getSubscriptionFileURL(id: sub.id)
             try? text.write(to: fileURL, atomically: true, encoding: .utf8)
 
-            let lineCount = text.components(separatedBy: .newlines).filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("!") && !$0.isEmpty }.count
+            let lineCount = text.components(separatedBy: .newlines).filter { line in
+                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                return !trimmed.isEmpty && !trimmed.hasPrefix("!") && !trimmed.hasPrefix("！") && !trimmed.hasPrefix("[")
+            }.count
 
             var subs = self.loadSubscriptions()
             if let idx = subs.firstIndex(where: { $0.id == sub.id }) {
@@ -218,37 +225,39 @@ final class AdBlockManager {
         var results: [[String: Any]] = []
         var line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !line.isEmpty else { return [] }
-        if line.hasPrefix("!") || line.hasPrefix("[") || line.hasPrefix("！") { return [] }
+        if line.hasPrefix("!") || line.hasPrefix("！") || line.hasPrefix("[") { return [] }
 
-        if line.contains("##") {
-            let parts = line.components(separatedBy: "##")
-            guard parts.count >= 2 else { return [] }
-            let domainStr = parts[0].trimmingCharacters(in: .whitespaces)
-            let fullSelector = parts.dropFirst().joined(separator: "##").trimmingCharacters(in: .whitespaces)
+        if let range = line.range(of: "##") {
+            let domainStr = String(line[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let fullSelector = String(line[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
             guard !fullSelector.isEmpty else { return [] }
 
             var ifDomains: [String] = []
             var unlessDomains: [String] = []
 
             if !domainStr.isEmpty {
-                let domains = domainStr.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+                let domains = domainStr.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 for d in domains {
-                    if d.hasPrefix("~") {
-                        let cleanD = String(d.dropFirst()).trimmingCharacters(in: .whitespaces)
-                        if !cleanD.isEmpty { unlessDomains.append(cleanD) }
-                    } else if !d.isEmpty {
-                        ifDomains.append(d)
+                    let cleanD = d.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: " ./\t\r\n"))
+                    if cleanD.hasPrefix("~") {
+                        let noTilde = String(cleanD.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !noTilde.isEmpty { unlessDomains.append(noTilde) }
+                    } else if !cleanD.isEmpty {
+                        ifDomains.append(cleanD)
                     }
                 }
             }
 
-            let selectorItems = fullSelector.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            let selectorItems = fullSelector.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             for sel in selectorItems {
-                if sel.isEmpty || sel.contains(":has(") || sel.contains(":matches(") { continue }
+                if sel.isEmpty || sel.contains(":has(") || sel.contains(":matches(") || sel.contains(":where(") { continue }
 
                 var trigger: [String: Any] = ["url-filter": ".*"]
-                if !ifDomains.isEmpty { trigger["if-domain"] = ifDomains }
-                if !unlessDomains.isEmpty { trigger["unless-domain"] = unlessDomains }
+                if !ifDomains.isEmpty {
+                    trigger["if-domain"] = ifDomains
+                } else if !unlessDomains.isEmpty {
+                    trigger["unless-domain"] = unlessDomains
+                }
 
                 let action: [String: Any] = [
                     "type": "css-display-none",
@@ -262,15 +271,15 @@ final class AdBlockManager {
         var isWhiteList = false
         if line.hasPrefix("@@") {
             isWhiteList = true
-            line = String(line.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+            line = String(line.dropFirst(2)).trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
         var urlPattern = line
         var optionsStr = ""
 
         if let dollarIndex = line.lastIndex(of: "$") {
-            urlPattern = String(line[..<dollarIndex]).trimmingCharacters(in: .whitespaces)
-            optionsStr = String(line[line.index(after: dollarIndex)...]).trimmingCharacters(in: .whitespaces)
+            urlPattern = String(line[..<dollarIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+            optionsStr = String(line[line.index(after: dollarIndex)...]).trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
         guard !urlPattern.isEmpty else { return [] }
@@ -283,14 +292,14 @@ final class AdBlockManager {
         if !optionsStr.isEmpty {
             let opts = optionsStr.components(separatedBy: ",")
             for opt in opts {
-                let trimmedOpt = opt.trimmingCharacters(in: .whitespaces)
+                let trimmedOpt = opt.trimmingCharacters(in: .whitespacesAndNewlines)
                 if trimmedOpt.hasPrefix("domain=") {
                     let domainVal = String(trimmedOpt.dropFirst(7))
                     let dList = domainVal.components(separatedBy: "|")
                     for d in dList {
-                        let clean = d.trimmingCharacters(in: .whitespaces)
+                        let clean = d.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: " ./\t\r\n"))
                         if clean.hasPrefix("~") {
-                            let noTilde = String(clean.dropFirst()).trimmingCharacters(in: .whitespaces)
+                            let noTilde = String(clean.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)
                             if !noTilde.isEmpty { unlessDomains.append(noTilde) }
                         } else if !clean.isEmpty {
                             ifDomains.append(clean)
@@ -301,11 +310,11 @@ final class AdBlockManager {
                 } else if trimmedOpt == "image" {
                     resourceTypes.append("image")
                 } else if trimmedOpt == "stylesheet" || trimmedOpt == "style" {
-                    resourceTypes.append("style")
+                    resourceTypes.append("style-sheet")
                 } else if trimmedOpt == "xmlhttprequest" || trimmedOpt == "xhr" {
-                    resourceTypes.append("xmlhttprequest")
+                    resourceTypes.append("raw")
                 } else if trimmedOpt == "subdocument" {
-                    resourceTypes.append("subdocument")
+                    resourceTypes.append("document")
                 } else if trimmedOpt == "media" {
                     resourceTypes.append("media")
                 } else if trimmedOpt == "font" {
@@ -321,10 +330,12 @@ final class AdBlockManager {
         var regexPattern = ""
         if urlPattern.hasPrefix("||") {
             let domainOnly = String(urlPattern.dropFirst(2)).replacingOccurrences(of: "^", with: "")
-            let escapedDomain = NSRegularExpression.escapedPattern(for: domainOnly)
+            let cleanDomain = domainOnly.trimmingCharacters(in: .whitespacesAndNewlines)
+            let escapedDomain = NSRegularExpression.escapedPattern(for: cleanDomain)
             regexPattern = ".*" + escapedDomain + ".*"
         } else {
-            var pattern = urlPattern
+            var pattern = urlPattern.trimmingCharacters(in: .whitespacesAndNewlines)
+            pattern = pattern.replacingOccurrences(of: " ", with: "")
             pattern = NSRegularExpression.escapedPattern(for: pattern)
             pattern = pattern.replacingOccurrences(of: "\\*", with: ".*")
             pattern = pattern.replacingOccurrences(of: "\\^", with: ".*")
@@ -340,10 +351,14 @@ final class AdBlockManager {
             "url-filter-is-case-sensitive": false
         ]
 
-        if !ifDomains.isEmpty { trigger["if-domain"] = ifDomains }
-        if !unlessDomains.isEmpty { trigger["unless-domain"] = unlessDomains }
+        if !ifDomains.isEmpty {
+            trigger["if-domain"] = ifDomains
+        } else if !unlessDomains.isEmpty {
+            trigger["unless-domain"] = unlessDomains
+        }
+
         if !resourceTypes.isEmpty { trigger["resource-type"] = resourceTypes }
-        if let loadType = loadType { trigger["load-type"] = loadType }
+        if let loadType = loadType { trigger["load-type"] = [loadType] }
 
         let actionType = isWhiteList ? "ignore-previous-rules" : "block"
         let action: [String: Any] = ["type": actionType]
