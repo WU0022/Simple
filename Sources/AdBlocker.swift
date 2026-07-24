@@ -1006,7 +1006,16 @@ final class AdBlockManager {
             )
         }
 
-        if let range = line.range(of: "##") {
+        let cosmeticSeparator: String?
+        if line.contains("##") {
+            cosmeticSeparator = "##"
+        } else if line.contains("#?#") {
+            cosmeticSeparator = "#?#"
+        } else {
+            cosmeticSeparator = nil
+        }
+
+        if let sep = cosmeticSeparator, let range = line.range(of: sep) {
             let domainsText = String(line[..<range.lowerBound])
             let selectorsText = String(line[range.upperBound...])
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1062,12 +1071,20 @@ final class AdBlockManager {
             let option = rawOption.trimmingCharacters(in: .whitespacesAndNewlines)
 
             if option.hasPrefix("domain=") {
-                let domains = normalizedDomains(
-                    from: String(option.dropFirst(7)),
-                    separator: "|"
-                )
+                let domainStr = String(option.dropFirst(7))
+                if domainStr.contains("/") {
+                    return AdBlockParsedLine(networkRule: nil, cosmeticRules: [], isUnsupported: true)
+                }
+                let domains = normalizedDomains(from: domainStr, separator: "|")
                 includeDomains.append(contentsOf: domains.include)
                 excludeDomains.append(contentsOf: domains.exclude)
+            } else if option.hasPrefix("denyallow=") {
+                let domainStr = String(option.dropFirst(10))
+                if domainStr.contains("/") {
+                    return AdBlockParsedLine(networkRule: nil, cosmeticRules: [], isUnsupported: true)
+                }
+                let domains = normalizedDomains(from: domainStr, separator: "|")
+                excludeDomains.append(contentsOf: domains.include)
             } else if option == "script" {
                 resourceTypes.append("script")
             } else if option == "image" {
@@ -1104,6 +1121,7 @@ final class AdBlockManager {
         let filter = urlFilterPattern(from: rawPattern)
 
         guard !filter.isEmpty,
+              filter.count < 256,
               (try? NSRegularExpression(pattern: filter)) != nil else {
             return AdBlockParsedLine(
                 networkRule: nil,
@@ -1154,7 +1172,6 @@ final class AdBlockManager {
               !value.contains("\u{0000}"),
               !value.contains("{"),
               !value.contains("}"),
-              !value.contains(";"),
               !value.contains("<"),
               !value.contains(">style") else {
             return nil
