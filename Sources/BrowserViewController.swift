@@ -124,7 +124,8 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         configureKeyboardDismissal()
         configureFullscreenExitGesture()
         configureInstallerObserver()
-        createNewTab(loadURL: nil)
+        configureAppLifecycleObservers()
+        restoreTabStateOrInit()
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -144,6 +145,47 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     deinit {
         NotificationCenter.default.removeObserver(self)
         progressObservation?.invalidate()
+    }
+
+    private func configureAppLifecycleObservers() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(saveTabState),
+            name: UIApplication.didEnterBackgroundNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(saveTabState),
+            name: UIApplication.willTerminateNotification,
+            object: nil
+        )
+    }
+
+    @objc private func saveTabState() {
+        let savedTabs: [SavedTabInfo] = tabs.map { tab in
+            SavedTabInfo(urlString: tab.url?.absoluteString, title: tab.title)
+        }
+        TabStateStore.shared.saveState(tabs: savedTabs, activeIndex: activeTabIndex)
+    }
+
+    private func restoreTabStateOrInit() {
+        if let savedState = TabStateStore.shared.loadState(), !savedState.tabs.isEmpty {
+            for info in savedState.tabs {
+                let tab = TabItem()
+                tab.title = info.title
+                tab.delegate = self
+                tabs.append(tab)
+                if let urlStr = info.urlString, let url = URL(string: urlStr) {
+                    tab.url = url
+                    tab.webView.load(URLRequest(url: url))
+                }
+            }
+            let validIndex = min(max(0, savedState.activeIndex), tabs.count - 1)
+            switchTab(to: validIndex)
+        } else {
+            createNewTab(loadURL: nil)
+        }
     }
 
     private func resetProgress() {
@@ -601,6 +643,8 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         if let url = url {
             load(url: url)
+        } else {
+            saveTabState()
         }
     }
 
@@ -641,6 +685,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         }
 
         updateUIState()
+        saveTabState()
     }
 
     private func closeTab(at index: Int) {
@@ -666,6 +711,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
                 activeTabIndex -= 1
             }
             updateUIState()
+            saveTabState()
         }
     }
 
@@ -859,6 +905,10 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
                 let rawString = url.absoluteString.removingPercentEncoding ?? url.absoluteString
                 let hostString = url.host?.removingPercentEncoding ?? url.host ?? rawString
                 addressField.text = hostString
+
+                if !tab.isLoading {
+                    HistoryStore.shared.addHistory(title: tab.title, urlString: rawString)
+                }
             }
         }
 
@@ -867,6 +917,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         }
 
         updateUIState()
+        saveTabState()
     }
 
     func tabDidFail(_ tab: TabItem, error: Error) {
@@ -1311,9 +1362,18 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     private func showAdBlockerManager() {
         let manager = AdBlockManagerViewController()
         manager.onRulesChanged = { [weak self] in
-            self?.tabs.forEach { $0.webView.reload() }
+            self?.showToastNotice("规则已应用，刷新页面后生效")
         }
         let nav = UINavigationController(rootViewController: manager)
+        present(nav, animated: true)
+    }
+
+    private func showBrowsingHistoryManager() {
+        let historyVC = HistoryViewController()
+        historyVC.onSelectURL = { [weak self] url in
+            self?.load(url: url)
+        }
+        let nav = UINavigationController(rootViewController: historyVC)
         present(nav, animated: true)
     }
 
@@ -1346,6 +1406,13 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             title: isAdBlockOn ? "广告拦截: 开启" : "广告拦截: 关闭",
             handler: { [weak self] in
                 self?.showAdBlockerManager()
+            }
+        ))
+
+        items.append(CustomBottomSheetItem(
+            title: "历史记录",
+            handler: { [weak self] in
+                self?.showBrowsingHistoryManager()
             }
         ))
 
@@ -1445,6 +1512,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         if options.contains(.searchHistory) {
             SearchHistoryStore.shared.clearHistory()
+            HistoryStore.shared.clearHistory()
         }
 
         if options.contains(.scriptData) {
