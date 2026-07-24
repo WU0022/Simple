@@ -98,6 +98,94 @@ struct CustomBottomSheetItem {
     }
 }
 
+struct HistoryItem: Codable, Equatable {
+    var id: String
+    var title: String
+    var urlString: String
+    var timestamp: Date
+}
+
+final class HistoryStore {
+    static let shared = HistoryStore()
+    private let key = "browser_browsing_history_v2"
+    private init() {}
+
+    func getHistory() -> [HistoryItem] {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let items = try? JSONDecoder().decode([HistoryItem].self, from: data) else {
+            return []
+        }
+        return items
+    }
+
+    func addHistory(title: String, urlString: String) {
+        let trimmedURL = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedURL.isEmpty, !trimmedURL.contains("about:blank") else { return }
+
+        var items = getHistory()
+        items.removeAll { $0.urlString == trimmedURL }
+
+        let displayTitle = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? (URL(string: trimmedURL)?.host ?? trimmedURL) : title
+        let newItem = HistoryItem(id: UUID().uuidString, title: displayTitle, urlString: trimmedURL, timestamp: Date())
+        items.insert(newItem, at: 0)
+
+        if items.count > 500 {
+            items = Array(items.prefix(500))
+        }
+
+        if let data = try? JSONEncoder().encode(items) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
+    func removeHistory(id: String) {
+        var items = getHistory()
+        items.removeAll { $0.id == id }
+        if let data = try? JSONEncoder().encode(items) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
+    func clearHistory() {
+        UserDefaults.standard.removeObject(forKey: key)
+    }
+}
+
+struct SavedTabInfo: Codable {
+    var urlString: String?
+    var title: String
+}
+
+struct SavedTabState: Codable {
+    var tabs: [SavedTabInfo]
+    var activeIndex: Int
+}
+
+final class TabStateStore {
+    static let shared = TabStateStore()
+    private let key = "browser_saved_tabs_state_v1"
+    private init() {}
+
+    func saveState(tabs: [SavedTabInfo], activeIndex: Int) {
+        let state = SavedTabState(tabs: tabs, activeIndex: activeIndex)
+        if let data = try? JSONEncoder().encode(state) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
+    func loadState() -> SavedTabState? {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let state = try? JSONDecoder().decode(SavedTabState.self, from: data) else {
+            return nil
+        }
+        return state
+    }
+
+    func clearState() {
+        UserDefaults.standard.removeObject(forKey: key)
+    }
+}
+
 final class UserAgentStore {
     static let shared = UserAgentStore()
     private let keyCustomItems = "browser_ua_custom_items_v4"
