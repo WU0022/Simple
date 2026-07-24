@@ -124,8 +124,8 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         configureKeyboardDismissal()
         configureFullscreenExitGesture()
         configureInstallerObserver()
-        configureAppLifecycleObservers()
-        restoreTabStateOrInit()
+        configureSessionObservers()
+        restorePreviousSession()
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -143,49 +143,9 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     }
 
     deinit {
+        persistCurrentSession()
         NotificationCenter.default.removeObserver(self)
         progressObservation?.invalidate()
-    }
-
-    private func configureAppLifecycleObservers() {
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(saveTabState),
-            name: UIApplication.didEnterBackgroundNotification,
-            object: nil
-        )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(saveTabState),
-            name: UIApplication.willTerminateNotification,
-            object: nil
-        )
-    }
-
-    @objc private func saveTabState() {
-        let savedTabs: [SavedTabInfo] = tabs.map { tab in
-            SavedTabInfo(urlString: tab.url?.absoluteString, title: tab.title)
-        }
-        TabStateStore.shared.saveState(tabs: savedTabs, activeIndex: activeTabIndex)
-    }
-
-    private func restoreTabStateOrInit() {
-        if let savedState = TabStateStore.shared.loadState(), !savedState.tabs.isEmpty {
-            for info in savedState.tabs {
-                let tab = TabItem()
-                tab.title = info.title
-                tab.delegate = self
-                tabs.append(tab)
-                if let urlStr = info.urlString, let url = URL(string: urlStr) {
-                    tab.url = url
-                    tab.webView.load(URLRequest(url: url))
-                }
-            }
-            let validIndex = min(max(0, savedState.activeIndex), tabs.count - 1)
-            switchTab(to: validIndex)
-        } else {
-            createNewTab(loadURL: nil)
-        }
     }
 
     private func resetProgress() {
@@ -199,6 +159,71 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             selector: #selector(handleInstallUserScriptNotification(_:)),
             name: NSNotification.Name("InstallUserScriptNotification"),
             object: nil
+        )
+    }
+
+    private func configureSessionObservers() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSessionPersistenceNotification),
+            name: UIApplication.didEnterBackgroundNotification,
+            object: nil
+        )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSessionPersistenceNotification),
+            name: UIApplication.willTerminateNotification,
+            object: nil
+        )
+    }
+
+    @objc private func handleSessionPersistenceNotification() {
+        persistCurrentSession()
+    }
+
+    private func restorePreviousSession() {
+        guard let session = BrowserSessionStore.shared.loadSession() else {
+            createNewTab(loadURL: nil)
+            return
+        }
+
+        let restoredTabs = session.tabs.map { item -> TabItem in
+            let tab = TabItem()
+            tab.delegate = self
+            tab.restoreSession(
+                url: item.urlString.flatMap(URL.init(string:)),
+                title: item.title
+            )
+            return tab
+        }
+
+        guard !restoredTabs.isEmpty else {
+            createNewTab(loadURL: nil)
+            return
+        }
+
+        tabs = restoredTabs
+        activeTabIndex = min(max(0, session.activeIndex), tabs.count - 1)
+        switchTab(to: activeTabIndex)
+    }
+
+    private func persistCurrentSession() {
+        guard !tabs.isEmpty else {
+            BrowserSessionStore.shared.clearSession()
+            return
+        }
+
+        let items = tabs.map { tab in
+            BrowserTabSessionItem(
+                urlString: tab.sessionURL()?.absoluteString,
+                title: tab.title
+            )
+        }
+
+        BrowserSessionStore.shared.saveSession(
+            tabs: items,
+            activeIndex: activeTabIndex
         )
     }
 
@@ -644,7 +669,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         if let url = url {
             load(url: url)
         } else {
-            saveTabState()
+            persistCurrentSession()
         }
     }
 
@@ -684,8 +709,12 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             showHomeUI()
         }
 
+        if let restoreURL = tab.consumePendingRestoreURL() {
+            tab.webView.load(URLRequest(url: restoreURL))
+        }
+
+        persistCurrentSession()
         updateUIState()
-        saveTabState()
     }
 
     private func closeTab(at index: Int) {
@@ -711,7 +740,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
                 activeTabIndex -= 1
             }
             updateUIState()
-            saveTabState()
+            persistCurrentSession()
         }
     }
 
@@ -747,8 +776,14 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
     private func load(url: URL) {
         showBrowserUI()
+
+        activeTab.url = url
+        activeTab.title = url.host ?? url.absoluteString
+
         addressField.text = url.absoluteString.removingPercentEncoding ?? url.absoluteString
         activeTab.webView.load(URLRequest(url: url))
+
+        persistCurrentSession()
     }
 
     private func showHomeUI() {
@@ -812,6 +847,8 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return nil }
 
+        SearchHistoryStore.shared.addHistory(value)
+
         if value.hasPrefix("http://") || value.hasPrefix("https://") {
             if let url = URL(string: value) {
                 return url
@@ -834,7 +871,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             }
         }
 
-        SearchHistoryStore.shared.addHistory(value)
         return SearchEngineStore.shared.currentEngine.searchURL(query: value)
     }
 
@@ -895,6 +931,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
     func tabDidUpdate(_ tab: TabItem) {
         guard !tabs.isEmpty, tab.id == activeTab.id else {
+            persistCurrentSession()
             return
         }
 
@@ -904,19 +941,23 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
                 let rawString = url.absoluteString.removingPercentEncoding ?? url.absoluteString
                 let hostString = url.host?.removingPercentEncoding ?? url.host ?? rawString
                 addressField.text = hostString
-
-                if !tab.isLoading {
-                    HistoryStore.shared.addHistory(title: tab.title, urlString: rawString)
-                }
             }
         }
 
         if !tab.isLoading {
             resetProgress()
+
+            if !tab.isDisplayingFailurePage,
+               let url = tab.url {
+                BrowserHistoryStore.shared.record(
+                    url: url,
+                    title: tab.title
+                )
+            }
         }
 
         updateUIState()
-        saveTabState()
+        persistCurrentSession()
     }
 
     func tabDidFail(_ tab: TabItem, error: Error) {
@@ -1367,15 +1408,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         present(nav, animated: true)
     }
 
-    private func showBrowsingHistoryManager() {
-        let historyVC = HistoryViewController()
-        historyVC.onSelectURL = { [weak self] url in
-            self?.load(url: url)
-        }
-        let nav = UINavigationController(rootViewController: historyVC)
-        present(nav, animated: true)
-    }
-
     @objc private func showMoreMenu() {
         dismissKeyboard()
 
@@ -1400,17 +1432,11 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             }
         ))
 
+        let isAdBlockOn = AdBlockManager.shared.isEnabled
         items.append(CustomBottomSheetItem(
-            title: "广告拦截设置",
+            title: isAdBlockOn ? "广告拦截: 开启" : "广告拦截: 关闭",
             handler: { [weak self] in
                 self?.showAdBlockerManager()
-            }
-        ))
-
-        items.append(CustomBottomSheetItem(
-            title: "历史记录",
-            handler: { [weak self] in
-                self?.showBrowsingHistoryManager()
             }
         ))
 
@@ -1445,6 +1471,13 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         ))
 
         items.append(CustomBottomSheetItem(
+            title: "历史记录",
+            handler: { [weak self] in
+                self?.showBrowserHistory()
+            }
+        ))
+
+        items.append(CustomBottomSheetItem(
             title: "清除数据与管理网站",
             isDestructive: false,
             handler: { [weak self] in
@@ -1461,6 +1494,23 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             }
         }
         present(panel, animated: true)
+    }
+
+    private func showBrowserHistory() {
+        dismissKeyboard()
+
+        let historyVC = BrowserHistoryViewController()
+
+        historyVC.onSelectURL = { [weak self] url in
+            self?.load(url: url)
+        }
+
+        let navigationController = UINavigationController(
+            rootViewController: historyVC
+        )
+
+        navigationController.modalPresentationStyle = .pageSheet
+        present(navigationController, animated: true)
     }
 
     private func showUserAgentManager() {
@@ -1510,7 +1560,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
         if options.contains(.searchHistory) {
             SearchHistoryStore.shared.clearHistory()
-            HistoryStore.shared.clearHistory()
+            BrowserHistoryStore.shared.clearHistory()
         }
 
         if options.contains(.scriptData) {
