@@ -9,11 +9,18 @@ struct UserScript: Codable {
     var isEnabled: Bool
 }
 
+enum UserAgentCategory: String, Codable {
+    case mobile
+    case desktop
+    case custom
+}
+
 struct UserAgentItem: Codable, Equatable {
     var id: String
     var name: String
     var uaString: String
     var isCustom: Bool
+    var category: UserAgentCategory
 }
 
 struct RegisteredMenuCommand {
@@ -100,48 +107,98 @@ struct CustomBottomSheetItem {
 
 final class UserAgentStore {
     static let shared = UserAgentStore()
-    private let keyCustomItems = "browser_ua_custom_items_v4"
-    private let keySelectedId = "browser_ua_selected_id_v4"
+    private let keyCustomItems = "browser_ua_custom_items_v5"
+    private let keySelectedId = "browser_ua_selected_id_v5"
 
-    private let defaultItems: [UserAgentItem] = [
+    private let defaultMobileItems: [UserAgentItem] = [
         UserAgentItem(
             id: "default_safari",
-            name: "iPhone",
+            name: "iPhone Safari (默认移动)",
             uaString: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/605.1.15",
-            isCustom: false
+            isCustom: false,
+            category: .mobile
         ),
         UserAgentItem(
             id: "default_chrome",
             name: "iPhone Chrome",
             uaString: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/125.0.6422.80 Mobile/15E148 Safari/604.1",
-            isCustom: false
+            isCustom: false,
+            category: .mobile
         ),
         UserAgentItem(
+            id: "default_ipad",
+            name: "iPad Safari",
+            uaString: "Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/605.1.15",
+            isCustom: false,
+            category: .mobile
+        ),
+        UserAgentItem(
+            id: "default_android_chrome",
+            name: "Android Chrome",
+            uaString: "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36",
+            isCustom: false,
+            category: .mobile
+        )
+    ]
+
+    private let defaultDesktopItems: [UserAgentItem] = [
+        UserAgentItem(
             id: "default_mac",
-            name: "macOS Chrome",
+            name: "macOS Chrome (默认电脑)",
             uaString: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-            isCustom: false
+            isCustom: false,
+            category: .desktop
+        ),
+        UserAgentItem(
+            id: "default_mac_safari",
+            name: "macOS Safari",
+            uaString: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15",
+            isCustom: false,
+            category: .desktop
+        ),
+        UserAgentItem(
+            id: "default_win_chrome",
+            name: "Windows Chrome",
+            uaString: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            isCustom: false,
+            category: .desktop
+        ),
+        UserAgentItem(
+            id: "default_win_edge",
+            name: "Windows Edge",
+            uaString: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0",
+            isCustom: false,
+            category: .desktop
         )
     ]
 
     private init() {}
 
-    func loadAllItems() -> [UserAgentItem] {
-        var items = defaultItems
+    func loadMobileItems() -> [UserAgentItem] {
+        return defaultMobileItems
+    }
+
+    func loadDesktopItems() -> [UserAgentItem] {
+        return defaultDesktopItems
+    }
+
+    func loadCustomItems() -> [UserAgentItem] {
         if let data = UserDefaults.standard.data(forKey: keyCustomItems),
            let customs = try? JSONDecoder().decode([UserAgentItem].self, from: data) {
-            items.append(contentsOf: customs)
+            return customs
         }
+        return []
+    }
+
+    func loadAllItems() -> [UserAgentItem] {
+        var items = defaultMobileItems + defaultDesktopItems
+        items.append(contentsOf: loadCustomItems())
         return items
     }
 
     func addCustomItem(name: String, uaString: String) {
-        var customs: [UserAgentItem] = []
-        if let data = UserDefaults.standard.data(forKey: keyCustomItems),
-           let decoded = try? JSONDecoder().decode([UserAgentItem].self, from: data) {
-            customs = decoded
-        }
-        let newItem = UserAgentItem(id: UUID().uuidString, name: name, uaString: uaString, isCustom: true)
+        var customs = loadCustomItems()
+        let newItem = UserAgentItem(id: UUID().uuidString, name: name, uaString: uaString, isCustom: true, category: .custom)
         customs.append(newItem)
         if let data = try? JSONEncoder().encode(customs) {
             UserDefaults.standard.set(data, forKey: keyCustomItems)
@@ -149,33 +206,29 @@ final class UserAgentStore {
     }
 
     func updateCustomItem(id: String, name: String, uaString: String) {
-        if let data = UserDefaults.standard.data(forKey: keyCustomItems),
-           var customs = try? JSONDecoder().decode([UserAgentItem].self, from: data) {
-            if let idx = customs.firstIndex(where: { $0.id == id }) {
-                customs[idx].name = name
-                customs[idx].uaString = uaString
-                if let data = try? JSONEncoder().encode(customs) {
-                    UserDefaults.standard.set(data, forKey: keyCustomItems)
-                }
+        var customs = loadCustomItems()
+        if let idx = customs.firstIndex(where: { $0.id == id }) {
+            customs[idx].name = name
+            customs[idx].uaString = uaString
+            if let data = try? JSONEncoder().encode(customs) {
+                UserDefaults.standard.set(data, forKey: keyCustomItems)
             }
         }
     }
 
     func deleteCustomItem(id: String) {
-        if let data = UserDefaults.standard.data(forKey: keyCustomItems),
-           var customs = try? JSONDecoder().decode([UserAgentItem].self, from: data) {
-            customs.removeAll { $0.id == id }
-            if let data = try? JSONEncoder().encode(customs) {
-                UserDefaults.standard.set(data, forKey: keyCustomItems)
-            }
+        var customs = loadCustomItems()
+        customs.removeAll { $0.id == id }
+        if let data = try? JSONEncoder().encode(customs) {
+            UserDefaults.standard.set(data, forKey: keyCustomItems)
         }
         if getSelectedId() == id {
-            setSelectedId(defaultItems[0].id)
+            setSelectedId(defaultMobileItems[0].id)
         }
     }
 
     func getSelectedId() -> String {
-        return UserDefaults.standard.string(forKey: keySelectedId) ?? defaultItems[0].id
+        return UserDefaults.standard.string(forKey: keySelectedId) ?? defaultMobileItems[0].id
     }
 
     func setSelectedId(_ id: String) {
@@ -185,13 +238,13 @@ final class UserAgentStore {
     func getSelectedUA() -> String {
         let all = loadAllItems()
         let selId = getSelectedId()
-        return all.first { $0.id == selId }?.uaString ?? defaultItems[0].uaString
+        return all.first { $0.id == selId }?.uaString ?? defaultMobileItems[0].uaString
     }
 
     func getSelectedItem() -> UserAgentItem {
         let all = loadAllItems()
         let selId = getSelectedId()
-        return all.first { $0.id == selId } ?? defaultItems[0]
+        return all.first { $0.id == selId } ?? defaultMobileItems[0]
     }
 }
 
