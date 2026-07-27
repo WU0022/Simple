@@ -698,9 +698,8 @@ final class WebsiteCleaner {
     }
 
     func cleanSingleDomain(record: WKWebsiteDataRecord, cacheOnly: Bool, completion: (() -> Void)? = nil) {
-        let isProtected = CookieLockStore.shared.isLocked(domain: record.displayName)
         let types: Set<String>
-        if cacheOnly || isProtected {
+        if cacheOnly {
             types = [
                 WKWebsiteDataTypeDiskCache,
                 WKWebsiteDataTypeMemoryCache,
