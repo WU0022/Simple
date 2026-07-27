@@ -228,6 +228,10 @@ final class AdBlockManager {
             return
         }
 
+        if let host = webView.url?.host, !DomainSettingsStore.shared.getBool(domain: host, setting: "adBlock", defaultVal: true) {
+            return
+        }
+
         let enabledSubs = Set(loadSubscriptions().filter { $0.isEnabled }.map { $0.id })
 
         for sourceId in compiledListsBySource.keys.sorted() {
@@ -1689,7 +1693,7 @@ final class AdBlockManagerViewController: UIViewController, UITableViewDataSourc
                 cell.textLabel?.text = "添加新订阅链接…"
                 cell.textLabel?.textColor = .systemBlue
                 cell.detailTextLabel?.text = nil
-                cell.accessoryView = nil
+                cell.accessoryType = .none
             }
 
             return cell
