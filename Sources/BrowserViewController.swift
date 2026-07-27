@@ -621,6 +621,32 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         showCleanDataMenu()
     }
 
+    private func showToastNotice(_ text: String) {
+        let toast = UILabel()
+        toast.text = "  \(text)  "
+        toast.font = .systemFont(ofSize: 13, weight: .medium)
+        toast.textColor = .white
+        toast.backgroundColor = UIColor.black.withAlphaComponent(0.75)
+        toast.layer.cornerRadius = 12
+        toast.clipsToBounds = true
+        toast.translatesAutoresizingMaskIntoConstraints = false
+        toast.alpha = 0
+
+        view.addSubview(toast)
+        NSLayoutConstraint.activate([
+            toast.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            toast.bottomAnchor.constraint(equalTo: bottomPanel.topAnchor, constant: -12),
+            toast.heightAnchor.constraint(equalToConstant: 32)
+        ])
+
+        UIView.animate(withDuration: 0.18) { toast.alpha = 1 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            UIView.animate(withDuration: 0.2, animations: { toast.alpha = 0 }) { _ in
+                toast.removeFromSuperview()
+            }
+        }
+    }
+
     private func configureToolbarButton(_ button: TouchButton, imageName: String, action: Selector?) {
         var configuration = UIButton.Configuration.plain()
         if imageName == "line.3.horizontal" {
