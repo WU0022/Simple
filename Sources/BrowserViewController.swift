@@ -75,7 +75,7 @@ final class AddressTextField: UITextField {
         return super.canPerformAction(action, withSender: sender)
     }
 
-    @objc func pasteAndGo(_ sender: Any?) {
+    override func pasteAndGo(_ sender: Any?) {
         guard let string = UIPasteboard.general.string, !string.isEmpty else { return }
         text = string
         onPasteAndGo?(string)
@@ -1526,32 +1526,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         }
         let nav = UINavigationController(rootViewController: cleanVC)
         present(nav, animated: true)
-    }
-
-    private func showToastNotice(_ text: String) {
-        let toast = UILabel()
-        toast.text = "  \(text)  "
-        toast.font = .systemFont(ofSize: 13, weight: .medium)
-        toast.textColor = .white
-        toast.backgroundColor = UIColor.black.withAlphaComponent(0.75)
-        toast.layer.cornerRadius = 12
-        toast.clipsToBounds = true
-        toast.translatesAutoresizingMaskIntoConstraints = false
-        toast.alpha = 0
-
-        view.addSubview(toast)
-        NSLayoutConstraint.activate([
-            toast.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            toast.bottomAnchor.constraint(equalTo: bottomPanel.topAnchor, constant: -12),
-            toast.heightAnchor.constraint(equalToConstant: 32)
-        ])
-
-        UIView.animate(withDuration: 0.18) { toast.alpha = 1 }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            UIView.animate(withDuration: 0.2, animations: { toast.alpha = 0 }) { _ in
-                toast.removeFromSuperview()
-            }
-        }
     }
 
     private func performCleanData(options: Set<CleanOption>, completion: @escaping () -> Void) {
