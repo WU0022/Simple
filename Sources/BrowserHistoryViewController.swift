@@ -62,7 +62,6 @@ final class BrowserHistoryViewController: UITableViewController, UISearchResults
         var earlierItems: [BrowserHistoryItem] = []
 
         let calendar = Calendar.current
-        let now = Date()
 
         for item in filtered {
             if calendar.isDateInToday(item.visitedAt) {
