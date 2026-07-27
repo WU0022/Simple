@@ -72,13 +72,30 @@ final class AddressTextField: UITextField {
         if action == #selector(pasteAndGo(_:)) {
             return UIPasteboard.general.hasStrings
         }
-        return super.canPerformAction(action, withSender: sender)
+        return false
+    }
+
+    override func copy(_ sender: Any?) {
+        UIPasteboard.general.string = text
     }
 
     override func pasteAndGo(_ sender: Any?) {
-        guard let string = UIPasteboard.general.string, !string.isEmpty else { return }
-        text = string
-        onPasteAndGo?(string)
+        guard let value = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return }
+        text = value
+        onPasteAndGo?(value)
+    }
+
+    func showQuickActionMenu() {
+        becomeFirstResponder()
+        if let cursorRange = textRange(from: endOfDocument, to: endOfDocument) {
+            selectedTextRange = cursorRange
+        }
+        UIMenuController.shared.menuItems = [
+            UIMenuItem(title: "粘贴并前往", action: #selector(pasteAndGo(_:)))
+        ]
+        DispatchQueue.main.async {
+            UIMenuController.shared.showMenu(from: self, rect: self.bounds)
+        }
     }
 }
 
@@ -440,6 +457,14 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             self.load(url: url)
         }
 
+        let addressLongPress = UILongPressGestureRecognizer(
+            target: self,
+            action: #selector(handleAddressLongPress(_:))
+        )
+        addressLongPress.minimumPressDuration = 0.45
+        addressLongPress.cancelsTouchesInView = true
+        addressField.addGestureRecognizer(addressLongPress)
+
         refreshButton.translatesAutoresizingMaskIntoConstraints = false
         refreshButton.tintColor = .secondaryLabel
         refreshButton.setImage(
@@ -483,7 +508,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         configureToolbarButton(pluginButton, imageName: "square.3.layers.3d", action: #selector(showPluginPanel))
 
         let longPressMore = UILongPressGestureRecognizer(target: self, action: #selector(handleMoreButtonLongPress(_:)))
-        longPressMore.minimumPressDuration = 0.4
+        longPressMore.minimumPressDuration = 0.45
         moreButton.addGestureRecognizer(longPressMore)
 
         navigationStack.addArrangedSubview(backButton)
@@ -584,36 +609,16 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         ])
     }
 
+    @objc private func handleAddressLongPress(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began else { return }
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        addressField.showQuickActionMenu()
+    }
+
     @objc private func handleMoreButtonLongPress(_ gesture: UILongPressGestureRecognizer) {
         guard gesture.state == .began else { return }
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         showCleanDataMenu()
-    }
-
-    private func showToastNotice(_ text: String) {
-        let toast = UILabel()
-        toast.text = "  \(text)  "
-        toast.font = .systemFont(ofSize: 13, weight: .medium)
-        toast.textColor = .white
-        toast.backgroundColor = UIColor.black.withAlphaComponent(0.75)
-        toast.layer.cornerRadius = 12
-        toast.clipsToBounds = true
-        toast.translatesAutoresizingMaskIntoConstraints = false
-        toast.alpha = 0
-
-        view.addSubview(toast)
-        NSLayoutConstraint.activate([
-            toast.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            toast.bottomAnchor.constraint(equalTo: bottomPanel.topAnchor, constant: -12),
-            toast.heightAnchor.constraint(equalToConstant: 32)
-        ])
-
-        UIView.animate(withDuration: 0.18) { toast.alpha = 1 }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            UIView.animate(withDuration: 0.2, animations: { toast.alpha = 0 }) { _ in
-                toast.removeFromSuperview()
-            }
-        }
     }
 
     private func configureToolbarButton(_ button: TouchButton, imageName: String, action: Selector?) {
@@ -990,10 +995,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         editingDimmingView.isHidden = false
         UIView.animate(withDuration: 0.2) {
             self.editingDimmingView.alpha = 1
-        }
-
-        DispatchQueue.main.async {
-            textField.selectAll(nil)
         }
     }
 
