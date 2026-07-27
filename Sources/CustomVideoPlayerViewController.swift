@@ -50,6 +50,11 @@ final class VideoProgressBar: UIControl {
         nil
     }
 
+    func setExpanded(_ expanded: Bool) {
+        isTrackingProgress = expanded
+        setNeedsLayout()
+    }
+
     override func layoutSubviews() {
         super.layoutSubviews()
 
@@ -103,8 +108,8 @@ final class VideoProgressBar: UIControl {
         }
 
         updateProgress(with: touch)
-        isTrackingProgress = false
         onProgressChanged?(progress, .ended)
+        isTrackingProgress = false
         setNeedsLayout()
     }
 
@@ -175,7 +180,6 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
     private let totalTimeLabel = UILabel()
 
     private let playPauseButton = TouchButton()
-    private let skipForwardButton = TouchButton()
     private let qualityButton = TouchButton()
     private let preloadButton = TouchButton()
     private let speedButton = TouchButton()
@@ -298,7 +302,7 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
         netSpeedLabel.text = "0 KB/s"
 
         var closeConfig = UIButton.Configuration.plain()
-        closeConfig.image = UIImage(systemName: "xmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .bold))
+        closeConfig.image = UIImage(systemName: "xmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .bold))
         closeConfig.baseForegroundColor = .white
         closeConfig.contentInsets = .zero
         closeButton.configuration = closeConfig
@@ -311,7 +315,7 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
         titleLabel.lineBreakMode = .byTruncatingTail
 
         var lockConfig = UIButton.Configuration.plain()
-        lockConfig.image = UIImage(systemName: "lock.open.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .regular))
+        lockConfig.image = UIImage(systemName: "lock.open.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 16, weight: .regular))
         lockConfig.baseForegroundColor = .white
         lockConfig.contentInsets = .zero
         lockButton.configuration = lockConfig
@@ -319,7 +323,7 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
         lockButton.addTarget(self, action: #selector(handleLockToggle), for: .touchUpInside)
 
         var pipConfig = UIButton.Configuration.plain()
-        pipConfig.image = UIImage(systemName: "pip.enter", withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .regular))
+        pipConfig.image = UIImage(systemName: "pip.enter", withConfiguration: UIImage.SymbolConfiguration(pointSize: 16, weight: .regular))
         pipConfig.baseForegroundColor = .white
         pipConfig.contentInsets = .zero
         pipButton.configuration = pipConfig
@@ -327,7 +331,7 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
         pipButton.addTarget(self, action: #selector(handlePipToggle), for: .touchUpInside)
 
         var aspectConfig = UIButton.Configuration.plain()
-        aspectConfig.image = UIImage(systemName: "aspectratio", withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .regular))
+        aspectConfig.image = UIImage(systemName: "aspectratio", withConfiguration: UIImage.SymbolConfiguration(pointSize: 16, weight: .regular))
         aspectConfig.baseForegroundColor = .white
         aspectConfig.contentInsets = .zero
         aspectButton.configuration = aspectConfig
@@ -353,8 +357,8 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
 
             closeButton.leadingAnchor.constraint(equalTo: topBar.leadingAnchor),
             closeButton.bottomAnchor.constraint(equalTo: topBar.bottomAnchor),
-            closeButton.widthAnchor.constraint(equalToConstant: 38),
-            closeButton.heightAnchor.constraint(equalToConstant: 38),
+            closeButton.widthAnchor.constraint(equalToConstant: 34),
+            closeButton.heightAnchor.constraint(equalToConstant: 34),
 
             titleLabel.leadingAnchor.constraint(equalTo: closeButton.trailingAnchor, constant: 8),
             titleLabel.trailingAnchor.constraint(equalTo: lockButton.leadingAnchor, constant: -12),
@@ -362,18 +366,18 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
 
             aspectButton.trailingAnchor.constraint(equalTo: topBar.trailingAnchor),
             aspectButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
-            aspectButton.widthAnchor.constraint(equalToConstant: 36),
-            aspectButton.heightAnchor.constraint(equalToConstant: 36),
+            aspectButton.widthAnchor.constraint(equalToConstant: 32),
+            aspectButton.heightAnchor.constraint(equalToConstant: 32),
 
             pipButton.trailingAnchor.constraint(equalTo: aspectButton.leadingAnchor, constant: -8),
             pipButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
-            pipButton.widthAnchor.constraint(equalToConstant: 36),
-            pipButton.heightAnchor.constraint(equalToConstant: 36),
+            pipButton.widthAnchor.constraint(equalToConstant: 32),
+            pipButton.heightAnchor.constraint(equalToConstant: 32),
 
             lockButton.trailingAnchor.constraint(equalTo: pipButton.leadingAnchor, constant: -8),
             lockButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
-            lockButton.widthAnchor.constraint(equalToConstant: 36),
-            lockButton.heightAnchor.constraint(equalToConstant: 36)
+            lockButton.widthAnchor.constraint(equalToConstant: 32),
+            lockButton.heightAnchor.constraint(equalToConstant: 32)
         ])
 
         currentTimeLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -392,18 +396,12 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
         totalTimeLabel.text = "00:00"
 
         var playConfig = UIButton.Configuration.plain()
-        playConfig.image = UIImage(systemName: "play.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .bold))
+        playConfig.image = UIImage(systemName: "play.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .bold))
         playConfig.baseForegroundColor = .white
+        playConfig.contentInsets = .zero
         playPauseButton.configuration = playConfig
         playPauseButton.translatesAutoresizingMaskIntoConstraints = false
         playPauseButton.addTarget(self, action: #selector(handlePlayPause), for: .touchUpInside)
-
-        var skipConfig = UIButton.Configuration.plain()
-        skipConfig.image = UIImage(systemName: "forward.end.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 16, weight: .bold))
-        skipConfig.baseForegroundColor = .white
-        skipForwardButton.configuration = skipConfig
-        skipForwardButton.translatesAutoresizingMaskIntoConstraints = false
-        skipForwardButton.addTarget(self, action: #selector(handleSkipForward), for: .touchUpInside)
 
         var qualityConfig = UIButton.Configuration.plain()
         qualityConfig.title = "4K"
@@ -445,14 +443,13 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
         bottomBar.addSubview(totalTimeLabel)
 
         bottomBar.addSubview(playPauseButton)
-        bottomBar.addSubview(skipForwardButton)
         bottomBar.addSubview(qualityButton)
         bottomBar.addSubview(preloadButton)
         bottomBar.addSubview(speedButton)
 
         NSLayoutConstraint.activate([
             currentTimeLabel.leadingAnchor.constraint(equalTo: bottomBar.leadingAnchor),
-            currentTimeLabel.topAnchor.constraint(equalTo: bottomBar.topAnchor, constant: 4),
+            currentTimeLabel.topAnchor.constraint(equalTo: bottomBar.topAnchor, constant: 14),
 
             videoProgressBar.leadingAnchor.constraint(equalTo: currentTimeLabel.trailingAnchor, constant: 14),
             videoProgressBar.trailingAnchor.constraint(equalTo: totalTimeLabel.leadingAnchor, constant: -14),
@@ -460,17 +457,12 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
             videoProgressBar.heightAnchor.constraint(equalToConstant: 32),
 
             totalTimeLabel.trailingAnchor.constraint(equalTo: bottomBar.trailingAnchor),
-            totalTimeLabel.topAnchor.constraint(equalTo: bottomBar.topAnchor, constant: 4),
+            totalTimeLabel.topAnchor.constraint(equalTo: bottomBar.topAnchor, constant: 14),
 
             playPauseButton.leadingAnchor.constraint(equalTo: bottomBar.leadingAnchor),
-            playPauseButton.bottomAnchor.constraint(equalTo: bottomBar.bottomAnchor, constant: -2),
-            playPauseButton.widthAnchor.constraint(equalToConstant: 32),
-            playPauseButton.heightAnchor.constraint(equalToConstant: 32),
-
-            skipForwardButton.leadingAnchor.constraint(equalTo: playPauseButton.trailingAnchor, constant: 16),
-            skipForwardButton.centerYAnchor.constraint(equalTo: playPauseButton.centerYAnchor),
-            skipForwardButton.widthAnchor.constraint(equalToConstant: 32),
-            skipForwardButton.heightAnchor.constraint(equalToConstant: 32),
+            playPauseButton.bottomAnchor.constraint(equalTo: bottomBar.bottomAnchor, constant: -6),
+            playPauseButton.widthAnchor.constraint(equalToConstant: 28),
+            playPauseButton.heightAnchor.constraint(equalToConstant: 28),
 
             speedButton.trailingAnchor.constraint(equalTo: bottomBar.trailingAnchor),
             speedButton.centerYAnchor.constraint(equalTo: playPauseButton.centerYAnchor),
@@ -554,6 +546,9 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
     private func setupPlayer() {
         activityIndicator.startAnimating()
 
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+        try? AVAudioSession.sharedInstance().setActive(true)
+
         let item = AVPlayerItem(url: videoURL)
         item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
         item.preferredForwardBufferDuration = currentPreloadDuration
@@ -571,6 +566,7 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
         if AVPictureInPictureController.isPictureInPictureSupported() {
             pipController = AVPictureInPictureController(playerLayer: layer)
             pipController?.delegate = self
+            pipController?.canStartPictureInPictureAutomaticallyFromInline = true
             pipButton.isHidden = false
         } else {
             pipButton.isHidden = true
@@ -665,6 +661,24 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
         }
     }
 
+    private func revealControls() {
+        controlsTimer?.invalidate()
+
+        guard !isControlsVisible else {
+            return
+        }
+
+        isControlsVisible = true
+
+        UIView.animate(withDuration: 0.18) {
+            self.controlsOverlay.alpha = 1
+            self.topGradientLayer.opacity = 1
+            self.bottomGradientLayer.opacity = 1
+        }
+
+        setNeedsStatusBarAppearanceUpdate()
+    }
+
     private func handleProgressInteraction(progress: Float, phase: VideoProgressInteractionPhase) {
         guard let duration = player?.currentItem?.duration, duration.isNumeric else { return }
         let totalSeconds = CMTimeGetSeconds(duration)
@@ -673,12 +687,15 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
 
         switch phase {
         case .began:
+            revealControls()
             isSeeking = true
             controlsTimer?.invalidate()
+            videoProgressBar.setExpanded(true)
             currentTimeLabel.text = formatTime(seconds: targetSeconds)
         case .changed:
             currentTimeLabel.text = formatTime(seconds: targetSeconds)
         case .ended:
+            videoProgressBar.setExpanded(false)
             player?.seek(to: targetTime, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
                 self?.isSeeking = false
                 self?.resetControlsTimer(delay: 1.0)
@@ -704,20 +721,12 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
         guard let player = player else { return }
         if player.timeControlStatus == .playing {
             player.pause()
-            playPauseButton.setImage(UIImage(systemName: "play.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .bold)), for: .normal)
+            playPauseButton.setImage(UIImage(systemName: "play.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .bold)), for: .normal)
         } else {
             player.play()
             player.rate = currentSpeed
-            playPauseButton.setImage(UIImage(systemName: "pause.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .bold)), for: .normal)
+            playPauseButton.setImage(UIImage(systemName: "pause.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .bold)), for: .normal)
         }
-        resetControlsTimer(delay: 1.0)
-    }
-
-    @objc private func handleSkipForward() {
-        guard let player = player else { return }
-        let current = player.currentTime()
-        let targetTime = CMTimeAdd(current, CMTime(seconds: 10, preferredTimescale: 600))
-        player.seek(to: targetTime)
         resetControlsTimer(delay: 1.0)
     }
 
@@ -740,12 +749,32 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
     }
 
     @objc private func handlePipToggle() {
-        guard let pip = pipController else { return }
-        if pip.isPictureInPictureActive {
-            pip.stopPictureInPicture()
-        } else {
-            pip.startPictureInPicture()
+        guard let pipController = pipController else {
+            showHUD(imageName: "pip.exit", text: "设备不支持小窗口")
+            hideHUD()
+            return
         }
+
+        if pipController.isPictureInPictureActive {
+            pipController.stopPictureInPicture()
+            return
+        }
+
+        guard pipController.isPictureInPicturePossible else {
+            showHUD(imageName: "pip.exit", text: "当前视频不支持小窗口")
+            hideHUD()
+            return
+        }
+
+        pipController.startPictureInPicture()
+    }
+
+    func pictureInPictureController(
+        _ pictureInPictureController: AVPictureInPictureController,
+        failedToStartPictureInPictureWithError error: Error
+    ) {
+        showHUD(imageName: "pip.exit", text: "小窗口启动失败")
+        hideHUD()
     }
 
     @objc private func handleAspectToggle() {
@@ -793,14 +822,12 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
     }
 
     @objc private func handlePreloadSelect() {
-        let alert = UIAlertController(title: "预加载缓冲区", message: "调大预加载范围可在弱网下获得更顺畅的播放体验", preferredStyle: .actionSheet)
+        let alert = UIAlertController(title: "预加载", message: nil, preferredStyle: .actionSheet)
         let options: [(String, TimeInterval)] = [
-            ("自动 (系统默认)", 0),
-            ("预加载 30 秒", 30.0),
-            ("预加载 60 秒", 60.0),
-            ("预加载 180 秒 (3分钟)", 180.0),
-            ("预加载 360 秒 (6分钟)", 360.0),
-            ("自定义预加载秒数...", -1.0)
+            ("120秒", 120.0),
+            ("180秒", 180.0),
+            ("360秒", 360.0),
+            ("自定义", -1.0)
         ]
         for (title, dur) in options {
             alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
@@ -817,13 +844,13 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
     }
 
     private func showCustomPreloadInputDialog() {
-        let alert = UIAlertController(title: "自定义预加载", message: "请输入预加载秒数 (如 500)", preferredStyle: .alert)
+        let alert = UIAlertController(title: "自定义", message: nil, preferredStyle: .alert)
         alert.addTextField { tf in
-            tf.placeholder = "预加载秒数"
+            tf.placeholder = "秒数"
             tf.keyboardType = .numberPad
         }
         alert.addAction(UIAlertAction(title: "确定", style: .default) { [weak self] _ in
-            guard let text = alert.textFields?[0].text?.trimmingCharacters(in: .whitespaces),
+            guard let text = alert.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines),
                   let val = Double(text), val > 0 else { return }
             self?.applyPreloadDuration(val)
         })
@@ -835,7 +862,7 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
         currentPreloadDuration = duration
         playerItem?.preferredForwardBufferDuration = duration
         var preloadConfig = UIButton.Configuration.plain()
-        preloadConfig.title = duration == 0 ? "预加载" : "\(Int(duration))s"
+        preloadConfig.title = "\(Int(duration))秒"
         preloadConfig.baseForegroundColor = .white
         preloadConfig.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
             var outgoing = incoming
@@ -873,10 +900,13 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
 
         switch gesture.state {
         case .began:
+            revealControls()
             if abs(velocity.x) > abs(velocity.y) {
                 panDirection = .horizontal
                 panStartSeekTime = player?.currentTime() ?? .zero
                 isSeeking = true
+                controlsTimer?.invalidate()
+                videoProgressBar.setExpanded(true)
             } else {
                 if location.x < view.bounds.width / 2 {
                     panDirection = .verticalLeft
@@ -912,7 +942,12 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
             }
         case .ended, .cancelled:
             if panDirection == .horizontal {
-                guard let duration = player?.currentItem?.duration, duration.isNumeric else { return }
+                videoProgressBar.setExpanded(false)
+                guard let duration = player?.currentItem?.duration, duration.isNumeric else {
+                    isSeeking = false
+                    resetControlsTimer(delay: 1.0)
+                    return
+                }
                 let totalSeconds = CMTimeGetSeconds(duration)
                 let deltaSeconds = Double(translation.x / view.bounds.width) * 90.0
                 let currentSeconds = CMTimeGetSeconds(panStartSeekTime)
@@ -925,6 +960,7 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
                 })
             } else {
                 hideHUD()
+                resetControlsTimer(delay: 1.0)
             }
             panDirection = .unknown
         default:
