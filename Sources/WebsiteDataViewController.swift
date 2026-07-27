@@ -19,7 +19,7 @@ final class WebsiteDataManagerViewController: UITableViewController, UISearchRes
         definesPresentationContext = true
 
         navigationItem.leftBarButtonItem = UIBarButtonItem(title: "关闭", style: .plain, target: self, action: #selector(handleDone))
-        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "清理缓存", style: .plain, target: self, action: #selector(handleCleanAllCaches))
+        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "清理未锁定数据", style: .plain, target: self, action: #selector(handleCleanAllCaches))
         loadData()
     }
 
@@ -48,13 +48,18 @@ final class WebsiteDataManagerViewController: UITableViewController, UISearchRes
     }
 
     @objc private func handleCleanAllCaches() {
-        let alert = UIAlertController(title: "清理未锁定网站数据", message: "将清理所有未锁定网站的缓存与本地数据，受保护网站的数据将被保留。", preferredStyle: .actionSheet)
-        alert.addAction(UIAlertAction(title: "清理未锁定数据", style: .default) { [weak self] _ in
+        let alert = UIAlertController(
+            title: "清理未锁定网站数据",
+            message: "将清除所有未锁定网站的缓存、Cookies、登录状态及本地数据。已锁定网站的数据将被保留。",
+            preferredStyle: .actionSheet
+        )
+
+        alert.addAction(UIAlertAction(title: "清理未锁定数据", style: .destructive) { [weak self] _ in
             WebsiteCleaner.shared.cleanUnprotectedLoginAndData {
                 self?.loadData()
             }
         })
-        alert.addAction(UIAlertAction(title: "取消", style: .cancel, handler: nil))
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
         present(alert, animated: true)
     }
 
@@ -105,17 +110,45 @@ final class WebsiteDataManagerViewController: UITableViewController, UISearchRes
     }
 
     override func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-        guard indexPath.row < filteredRecords.count else { return nil }
+        guard indexPath.row < filteredRecords.count else {
+            return nil
+        }
+
         let record = filteredRecords[indexPath.row]
         let isLocked = CookieLockStore.shared.isLocked(domain: record.displayName)
 
-        let deleteAction = UIContextualAction(style: .normal, title: "删除") { [weak self] _, _, completion in
-            WebsiteCleaner.shared.cleanSingleDomain(record: record, cacheOnly: false) {
+        let deleteAction = UIContextualAction(style: .destructive, title: "删除") { [weak self] _, _, completion in
+            let message = isLocked
+                ? "该网站已锁定，但你正在主动删除。删除后将清除 Cookies、登录状态、缓存及本地数据。"
+                : "将清除该网站的 Cookies、登录状态、缓存及本地数据。"
+
+            let alert = UIAlertController(
+                title: "删除网站数据",
+                message: message,
+                preferredStyle: .alert
+            )
+
+            alert.addAction(UIAlertAction(title: "取消", style: .cancel) { _ in
+                completion(false)
+            })
+
+            alert.addAction(UIAlertAction(title: "删除全部数据", style: .destructive) { [weak self] _ in
+                WebsiteCleaner.shared.cleanSingleDomain(record: record, cacheOnly: false) {
+                    self?.loadData()
+                    completion(true)
+                }
+            })
+
+            self?.present(alert, animated: true)
+        }
+
+        let cacheAction = UIContextualAction(style: .normal, title: "缓存") { [weak self] _, _, completion in
+            WebsiteCleaner.shared.cleanSingleDomain(record: record, cacheOnly: true) {
                 self?.loadData()
                 completion(true)
             }
         }
-        deleteAction.backgroundColor = .systemRed
+        cacheAction.backgroundColor = .systemBlue
 
         let lockActionTitle = isLocked ? "解锁" : "锁定"
         let lockAction = UIContextualAction(style: .normal, title: lockActionTitle) { [weak self] _, _, completion in
@@ -125,7 +158,7 @@ final class WebsiteDataManagerViewController: UITableViewController, UISearchRes
         }
         lockAction.backgroundColor = .systemOrange
 
-        return UISwipeActionsConfiguration(actions: [deleteAction, lockAction])
+        return UISwipeActionsConfiguration(actions: [deleteAction, cacheAction, lockAction])
     }
 }
 
