@@ -241,35 +241,44 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         (function() {
             try {
                 var btnId = '__sniff_floating_btn__';
+                var lastSniffedUrl = null;
 
-                function extractVideoSrc(v) {
-                    if (v.currentSrc && v.currentSrc.indexOf('blob:') !== 0) return v.currentSrc;
-                    if (v.src && v.src.indexOf('blob:') !== 0) return v.src;
-                    var sources = v.querySelectorAll('source');
-                    for (var i = 0; i < sources.length; i++) {
-                        var s = sources[i].src;
-                        if (s && s.indexOf('blob:') !== 0) return s;
-                    }
-                    return null;
+                function isValidMediaUrl(url) {
+                    if (!url || typeof url !== 'string') return false;
+                    if (url.indexOf('blob:') === 0 || url.indexOf('data:') === 0) return false;
+                    var lower = url.toLowerCase();
+                    return lower.indexOf('.m3u8') !== -1 ||
+                           lower.indexOf('.mp4') !== -1 ||
+                           lower.indexOf('.flv') !== -1 ||
+                           lower.indexOf('.m4s') !== -1 ||
+                           lower.indexOf('/video/') !== -1;
                 }
 
                 function createFloatingBtn(src) {
-                    if (document.getElementById(btnId)) return;
+                    if (!src) return;
+                    lastSniffedUrl = src;
+                    var existing = document.getElementById(btnId);
+                    if (existing) {
+                        existing.dataset.videoUrl = src;
+                        return;
+                    }
+
                     var btn = document.createElement('div');
                     btn.id = btnId;
+                    btn.dataset.videoUrl = src;
                     btn.innerHTML = `
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="white" style="margin-left: 3px; pointer-events: none;"><path d="M8 5v14l11-7z"/></svg>
-                        <div style="position: absolute; top: 1px; right: 1px; width: 10px; height: 10px; background-color: #FF3B30; border-radius: 50%; pointer-events: none;"></div>
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="white" style="margin-left: 2px; pointer-events: none;"><path d="M8 5v14l11-7z"/></svg>
+                        <div style="position: absolute; top: -1px; right: -1px; width: 12px; height: 12px; background-color: #FF3B30; border: 2px solid #ffffff; border-radius: 50%; pointer-events: none;"></div>
                     `;
                     btn.style.cssText = `
                         position: fixed;
-                        right: 16px;
+                        right: 18px;
                         bottom: 120px;
-                        width: 50px;
-                        height: 50px;
+                        width: 52px;
+                        height: 52px;
                         border-radius: 50%;
-                        background: #4299E1;
-                        box-shadow: 0 4px 14px rgba(0,0,0,0.3);
+                        background: linear-gradient(135deg, #3B82F6 0%, #1D4ED8 100%);
+                        box-shadow: 0 8px 24px rgba(29, 78, 216, 0.45);
                         z-index: 999999;
                         display: flex;
                         align-items: center;
@@ -278,12 +287,14 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
                         user-select: none;
                         -webkit-user-select: none;
                         -webkit-tap-highlight-color: transparent;
+                        transition: transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1);
                     `;
 
                     var isDragging = false;
                     var startX, startY, initialX, initialY;
 
                     btn.addEventListener('touchstart', function(e) {
+                        btn.style.transform = 'scale(0.88)';
                         var touch = e.touches[0];
                         startX = touch.clientX;
                         startY = touch.clientY;
@@ -297,7 +308,7 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
                         var touch = e.touches[0];
                         var dx = touch.clientX - startX;
                         var dy = touch.clientY - startY;
-                        if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+                        if (Math.abs(dx) > 6 || Math.abs(dy) > 6) {
                             isDragging = true;
                         }
                         if (isDragging) {
@@ -309,34 +320,82 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
                     }, {passive: true});
 
                     btn.addEventListener('touchend', function(e) {
+                        btn.style.transform = 'scale(1.0)';
                         if (!isDragging) {
-                            try {
-                                window.webkit.messageHandlers.VideoHelper.postMessage({
-                                    action: 'openCustomPlayer',
-                                    url: src
-                                });
-                            } catch(err) {}
+                            var currentSrc = btn.dataset.videoUrl || lastSniffedUrl;
+                            if (currentSrc) {
+                                try {
+                                    window.webkit.messageHandlers.VideoHelper.postMessage({
+                                        action: 'openCustomPlayer',
+                                        url: currentSrc
+                                    });
+                                } catch(err) {}
+                            }
                         }
                     });
 
                     (document.body || document.documentElement).appendChild(btn);
                 }
 
-                function sniffVideos() {
+                function sniffDomVideos() {
                     var videos = document.querySelectorAll('video');
                     for (var i = 0; i < videos.length; i++) {
-                        var src = extractVideoSrc(videos[i]);
-                        if (src) {
+                        var v = videos[i];
+                        var src = v.currentSrc || v.src;
+                        if (isValidMediaUrl(src)) {
                             createFloatingBtn(src);
+                            return;
+                        }
+                        var sources = v.querySelectorAll('source');
+                        for (var j = 0; j < sources.length; j++) {
+                            if (isValidMediaUrl(sources[j].src)) {
+                                createFloatingBtn(sources[j].src);
+                                return;
+                            }
+                        }
+                    }
+                }
+
+                function sniffPerformanceEntries() {
+                    if (!window.performance || typeof window.performance.getEntriesByType !== 'function') return;
+                    var entries = window.performance.getEntriesByType('resource');
+                    for (var i = entries.length - 1; i >= 0; i--) {
+                        var name = entries[i].name;
+                        if (isValidMediaUrl(name)) {
+                            createFloatingBtn(name);
                             break;
                         }
                     }
                 }
 
-                sniffVideos();
+                sniffDomVideos();
+                sniffPerformanceEntries();
+
+                var origFetch = window.fetch;
+                if (origFetch) {
+                    window.fetch = function() {
+                        var url = arguments[0];
+                        if (typeof url === 'string' && isValidMediaUrl(url)) {
+                            createFloatingBtn(url);
+                        } else if (url && typeof url.url === 'string' && isValidMediaUrl(url.url)) {
+                            createFloatingBtn(url.url);
+                        }
+                        return origFetch.apply(this, arguments);
+                    };
+                }
+
+                var origOpen = XMLHttpRequest.prototype.open;
+                if (origOpen) {
+                    XMLHttpRequest.prototype.open = function(method, url) {
+                        if (typeof url === 'string' && isValidMediaUrl(url)) {
+                            createFloatingBtn(url);
+                        }
+                        return origOpen.apply(this, arguments);
+                    };
+                }
 
                 var observer = new MutationObserver(function() {
-                    sniffVideos();
+                    sniffDomVideos();
                 });
 
                 observer.observe(document.documentElement || document.body, {
