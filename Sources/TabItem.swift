@@ -54,6 +54,7 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
 
         AdBlockManager.shared.attach(to: webView)
         userContentController.add(self, name: "GM")
+        userContentController.add(self, name: "VideoHelper")
 
         webView.navigationDelegate = self
         webView.uiDelegate = self
@@ -88,6 +89,7 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         })();
         """, completionHandler: nil)
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "GM")
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "VideoHelper")
         webView.load(URLRequest(url: URL(string: "about:blank")!))
         webView.removeFromSuperview()
         snapshot = nil
@@ -124,6 +126,22 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        if message.name == "VideoHelper", let body = message.body as? [String: Any], let action = body["action"] as? String {
+            if action == "openCustomPlayer", let urlStr = body["url"] as? String, let videoURL = URL(string: urlStr) {
+                DispatchQueue.main.async {
+                    let playerVC = CustomVideoPlayerViewController(videoURL: videoURL, title: self.title)
+                    if let topVC = UIApplication.shared.windows.first(where: { $0.isKeyWindow })?.rootViewController {
+                        var presenter = topVC
+                        while let presented = presenter.presentedViewController {
+                            presenter = presented
+                        }
+                        presenter.present(playerVC, animated: true)
+                    }
+                }
+            }
+            return
+        }
+
         guard let body = message.body as? [String: Any], let action = body["action"] as? String else { return }
 
         if action == "goBackAction" {
@@ -156,8 +174,10 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
             let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
                 DispatchQueue.main.async {
                     if let error = error {
-                        let errEscaped = error.localizedDescription.replacingOccurrences(of: "'", with: "\\'")
-                        self?.webView.evaluateJavaScript("window.__gm_handleXhrError('\(reqId)', '\(errEscaped)')", completionHandler: nil)
+                        let errData = (try? JSONSerialization.data(withJSONObject: [error.localizedDescription], options: [])) ?? Data()
+                        let errJSON = String(data: errData, encoding: .utf8) ?? "[\"\"]"
+                        let unwrappedErr = String(errJSON.dropFirst().dropLast())
+                        self?.webView.evaluateJavaScript("window.__gm_handleXhrError('\(reqId)', \(unwrappedErr))", completionHandler: nil)
                         return
                     }
 
@@ -216,21 +236,29 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         let js = """
         (function() {
             try {
-                function fixInlineVideo(v) {
-                    if (!v) return;
+                function attachNativeButton(v) {
+                    if (!v || v.dataset.hasNativeBtn) return;
+                    v.dataset.hasNativeBtn = 'true';
                     v.setAttribute('playsinline', 'true');
                     v.setAttribute('webkit-playsinline', 'true');
-                    v.playsInline = true;
-                    if (v.webkitSupportsPresentationMode && typeof v.webkitSetPresentationMode === 'function') {
-                        if (v.webkitPresentationMode === 'fullscreen') {
-                            v.webkitSetPresentationMode('inline');
+
+                    v.addEventListener('play', function() {
+                        var src = v.currentSrc || v.src;
+                        if (src && src.indexOf('blob:') !== 0) {
+                            try {
+                                window.webkit.messageHandlers.VideoHelper.postMessage({
+                                    action: 'openCustomPlayer',
+                                    url: src
+                                });
+                                v.pause();
+                            } catch(e) {}
                         }
-                    }
+                    });
                 }
 
                 var videos = document.querySelectorAll('video');
                 for (var i = 0; i < videos.length; i++) {
-                    fixInlineVideo(videos[i]);
+                    attachNativeButton(videos[i]);
                 }
 
                 var observer = new MutationObserver(function(mutations) {
@@ -239,11 +267,11 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
                         for (var j = 0; j < added.length; j++) {
                             var node = added[j];
                             if (node.tagName === 'VIDEO') {
-                                fixInlineVideo(node);
+                                attachNativeButton(node);
                             } else if (node.querySelectorAll) {
                                 var innerVideos = node.querySelectorAll('video');
                                 for (var k = 0; k < innerVideos.length; k++) {
-                                    fixInlineVideo(innerVideos[k]);
+                                    attachNativeButton(innerVideos[k]);
                                 }
                             }
                         }
