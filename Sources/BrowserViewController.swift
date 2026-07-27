@@ -63,42 +63,15 @@ class TouchButton: UIButton {
 }
 
 final class AddressTextField: UITextField {
-    var onPasteAndGo: ((String) -> Void)?
-
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-        if action == #selector(copy(_:)) {
-            return !(text?.isEmpty ?? true)
+        if action == #selector(copy(_:)) ||
+           action == #selector(paste(_:)) ||
+           action == #selector(selectAll(_:)) ||
+           action == #selector(select(_:)) ||
+           action == #selector(cut(_:)) {
+            return true
         }
-        if action == #selector(pasteAndGo(_:)) {
-            return UIPasteboard.general.hasStrings
-        }
-        return false
-    }
-
-    override func copy(_ sender: Any?) {
-        UIPasteboard.general.string = text
-    }
-
-    override func pasteAndGo(_ sender: Any?) {
-        guard let value = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return }
-        text = value
-        onPasteAndGo?(value)
-    }
-
-    func showQuickActionMenu() {
-        if !isFirstResponder {
-            becomeFirstResponder()
-        }
-        if let cursorRange = textRange(from: endOfDocument, to: endOfDocument) {
-            selectedTextRange = cursorRange
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-            guard self.isFirstResponder else { return }
-            UIMenuController.shared.menuItems = [
-                UIMenuItem(title: "粘贴并前往", action: #selector(self.pasteAndGo(_:)))
-            ]
-            UIMenuController.shared.showMenu(from: self, rect: self.bounds)
-        }
+        return super.canPerformAction(action, withSender: sender)
     }
 }
 
@@ -138,14 +111,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     private let pluginButton = TouchButton()
     private let tabsButton = TouchButton()
     private let moreButton = TouchButton()
-
-    private lazy var addressLongPressGesture: UILongPressGestureRecognizer = {
-        let gesture = UILongPressGestureRecognizer(target: self, action: #selector(handleAddressLongPress(_:)))
-        gesture.minimumPressDuration = 0.45
-        gesture.cancelsTouchesInView = true
-        gesture.delegate = self
-        return gesture
-    }()
 
     private var bottomPanelBottomConstraint: NSLayoutConstraint?
     private var webTopSafeConstraint: NSLayoutConstraint?
@@ -436,7 +401,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         addressContainer.backgroundColor = .white
         addressContainer.layer.cornerRadius = 22
         addressContainer.clipsToBounds = true
-        addressContainer.addGestureRecognizer(addressLongPressGesture)
 
         lockButton.translatesAutoresizingMaskIntoConstraints = false
         lockButton.tintColor = .secondaryLabel
@@ -463,11 +427,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         addressField.clearButtonMode = .never
         addressField.textContentType = .URL
         addressField.addTarget(self, action: #selector(addressFieldDidChange), for: .editingChanged)
-        addressField.onPasteAndGo = { [weak self] input in
-            guard let self = self, let url = self.destinationURL(from: input) else { return }
-            self.addressField.resignFirstResponder()
-            self.load(url: url)
-        }
 
         refreshButton.translatesAutoresizingMaskIntoConstraints = false
         refreshButton.tintColor = .secondaryLabel
@@ -611,12 +570,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             navigationStack.bottomAnchor.constraint(equalTo: bottomPanel.safeAreaLayoutGuide.bottomAnchor, constant: -4),
             navigationStack.heightAnchor.constraint(equalToConstant: 38)
         ])
-    }
-
-    @objc private func handleAddressLongPress(_ gesture: UILongPressGestureRecognizer) {
-        guard gesture.state == .began else { return }
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        addressField.showQuickActionMenu()
     }
 
     @objc private func handleMoreButtonLongPress(_ gesture: UILongPressGestureRecognizer) {
@@ -1058,13 +1011,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        if gestureRecognizer === addressLongPressGesture {
-            guard let touchedView = touch.view else {
-                return false
-            }
-            return touchedView === addressContainer || touchedView.isDescendant(of: addressContainer)
-        }
-
         if touch.view?.isDescendant(of: addressContainer) == true {
             return false
         }
@@ -1216,7 +1162,9 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         guard let host = activeTab.url?.host else { return }
 
         let settingsVC = DomainSettingsViewController(domain: host) { [weak self] in
-            self?.activeTab.reloadUserScripts()
+            guard let self = self else { return }
+            self.activeTab.reloadUserScripts()
+            AdBlockManager.shared.applyRules(to: self.activeTab.webView)
         }
         settingsVC.onExtractText = { [weak self] in
             self?.extractPageText()
