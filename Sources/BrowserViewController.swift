@@ -1446,16 +1446,17 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             }
         ))
 
-        let isDesktop = currentUAItem.category == .desktop || currentUAItem.id == "default_mac"
+        let isDesktop = UserAgentStore.shared.currentMode == .desktop
         items.append(CustomBottomSheetItem(
             title: isDesktop ? "切换为移动版" : "切换为电脑版",
             handler: { [weak self] in
                 guard let self = self else { return }
-                let targetId = isDesktop ? "default_safari" : "default_mac"
-                UserAgentStore.shared.setSelectedId(targetId)
+                let newMode: UserAgentCategory = isDesktop ? .mobile : .desktop
+                UserAgentStore.shared.currentMode = newMode
                 let newUA = UserAgentStore.shared.getSelectedUA()
                 self.activeTab.webView.customUserAgent = newUA
-                self.activeTab.webView.configuration.defaultWebpagePreferences.preferredContentMode = isDesktop ? .mobile : .desktop
+                self.activeTab.webView.configuration.defaultWebpagePreferences.preferredContentMode = (newMode == .desktop) ? .desktop : .mobile
+                self.activeTab.reloadUserScripts()
                 self.activeTab.webView.reloadFromOrigin()
             }
         ))
@@ -1507,8 +1508,8 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         let manager = UserAgentManagerViewController()
         manager.onUASelected = { [weak self] item in
             guard let self = self else { return }
-            let isDesktop = item.category == .desktop || item.id == "default_mac"
-            self.activeTab.webView.customUserAgent = item.uaString
+            let isDesktop = UserAgentStore.shared.currentMode == .desktop
+            self.activeTab.webView.customUserAgent = UserAgentStore.shared.getSelectedUA()
             self.activeTab.webView.configuration.defaultWebpagePreferences.preferredContentMode = isDesktop ? .desktop : .mobile
             self.activeTab.reloadUserScripts()
             self.activeTab.webView.reloadFromOrigin()
