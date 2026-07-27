@@ -113,7 +113,7 @@ final class UserAgentStore {
     private let defaultMobileItems: [UserAgentItem] = [
         UserAgentItem(
             id: "default_safari",
-            name: "iPhone Safari (默认移动)",
+            name: "iPhone Safari",
             uaString: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/605.1.15",
             isCustom: false,
             category: .mobile
@@ -144,7 +144,7 @@ final class UserAgentStore {
     private let defaultDesktopItems: [UserAgentItem] = [
         UserAgentItem(
             id: "default_mac",
-            name: "macOS Chrome (默认电脑)",
+            name: "macOS Chrome",
             uaString: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
             isCustom: false,
             category: .desktop
@@ -715,5 +715,35 @@ final class WebsiteCleaner {
                 completion?()
             }
         }
+    }
+}
+
+final class FaviconLoader {
+    static let shared = FaviconLoader()
+    private var cache = NSCache<NSString, UIImage>()
+    private init() {}
+
+    func loadFavicon(for domain: String, completion: @escaping (UIImage?) -> Void) {
+        let cleanDomain = domain.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let cached = cache.object(forKey: cleanDomain as NSString) {
+            completion(cached)
+            return
+        }
+
+        guard let url = URL(string: "https://www.google.com/s2/favicons?sz=64&domain=\(cleanDomain)") else {
+            completion(nil)
+            return
+        }
+
+        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
+            guard let data = data, let image = UIImage(data: data) else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            self?.cache.setObject(image, forKey: cleanDomain as NSString)
+            DispatchQueue.main.async {
+                completion(image)
+            }
+        }.resume()
     }
 }
