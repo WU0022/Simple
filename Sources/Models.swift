@@ -108,7 +108,9 @@ struct CustomBottomSheetItem {
 final class UserAgentStore {
     static let shared = UserAgentStore()
     private let keyCustomItems = "browser_ua_custom_items_v5"
-    private let keySelectedId = "browser_ua_selected_id_v5"
+    private let keySelectedMobileId = "browser_ua_selected_mobile_id_v6"
+    private let keySelectedDesktopId = "browser_ua_selected_desktop_id_v6"
+    private let keyCurrentMode = "browser_ua_current_mode_v6"
 
     private let defaultMobileItems: [UserAgentItem] = [
         UserAgentItem(
@@ -174,6 +176,19 @@ final class UserAgentStore {
 
     private init() {}
 
+    var currentMode: UserAgentCategory {
+        get {
+            guard let raw = UserDefaults.standard.string(forKey: keyCurrentMode),
+                  let cat = UserAgentCategory(rawValue: raw) else {
+                return .mobile
+            }
+            return cat
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: keyCurrentMode)
+        }
+    }
+
     func loadMobileItems() -> [UserAgentItem] {
         return defaultMobileItems
     }
@@ -196,9 +211,9 @@ final class UserAgentStore {
         return items
     }
 
-    func addCustomItem(name: String, uaString: String) {
+    func addCustomItem(name: String, uaString: String, category: UserAgentCategory = .mobile) {
         var customs = loadCustomItems()
-        let newItem = UserAgentItem(id: UUID().uuidString, name: name, uaString: uaString, isCustom: true, category: .custom)
+        let newItem = UserAgentItem(id: UUID().uuidString, name: name, uaString: uaString, isCustom: true, category: category)
         customs.append(newItem)
         if let data = try? JSONEncoder().encode(customs) {
             UserDefaults.standard.set(data, forKey: keyCustomItems)
@@ -222,29 +237,42 @@ final class UserAgentStore {
         if let data = try? JSONEncoder().encode(customs) {
             UserDefaults.standard.set(data, forKey: keyCustomItems)
         }
-        if getSelectedId() == id {
-            setSelectedId(defaultMobileItems[0].id)
+        if getSelectedMobileId() == id {
+            setSelectedMobileId(defaultMobileItems[0].id)
+        }
+        if getSelectedDesktopId() == id {
+            setSelectedDesktopId(defaultDesktopItems[0].id)
         }
     }
 
-    func getSelectedId() -> String {
-        return UserDefaults.standard.string(forKey: keySelectedId) ?? defaultMobileItems[0].id
+    func getSelectedMobileId() -> String {
+        return UserDefaults.standard.string(forKey: keySelectedMobileId) ?? defaultMobileItems[0].id
     }
 
-    func setSelectedId(_ id: String) {
-        UserDefaults.standard.set(id, forKey: keySelectedId)
+    func setSelectedMobileId(_ id: String) {
+        UserDefaults.standard.set(id, forKey: keySelectedMobileId)
+    }
+
+    func getSelectedDesktopId() -> String {
+        return UserDefaults.standard.string(forKey: keySelectedDesktopId) ?? defaultDesktopItems[0].id
+    }
+
+    func setSelectedDesktopId(_ id: String) {
+        UserDefaults.standard.set(id, forKey: keySelectedDesktopId)
     }
 
     func getSelectedUA() -> String {
         let all = loadAllItems()
-        let selId = getSelectedId()
-        return all.first { $0.id == selId }?.uaString ?? defaultMobileItems[0].uaString
+        let selId = (currentMode == .desktop) ? getSelectedDesktopId() : getSelectedMobileId()
+        let defaultItem = (currentMode == .desktop) ? defaultDesktopItems[0] : defaultMobileItems[0]
+        return all.first { $0.id == selId }?.uaString ?? defaultItem.uaString
     }
 
     func getSelectedItem() -> UserAgentItem {
         let all = loadAllItems()
-        let selId = getSelectedId()
-        return all.first { $0.id == selId } ?? defaultMobileItems[0]
+        let selId = (currentMode == .desktop) ? getSelectedDesktopId() : getSelectedMobileId()
+        let defaultItem = (currentMode == .desktop) ? defaultDesktopItems[0] : defaultMobileItems[0]
+        return all.first { $0.id == selId } ?? defaultItem
     }
 }
 
