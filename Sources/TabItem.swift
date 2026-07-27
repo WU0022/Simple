@@ -233,49 +233,110 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
     }
 
     private func injectInlineVideoHelper() {
+        let currentHost = url?.host ?? ""
+        let isPopoutEnabled = DomainSettingsStore.shared.getBool(domain: currentHost, setting: "videoPopout", defaultVal: true)
+        guard isPopoutEnabled else { return }
+
         let js = """
         (function() {
             try {
-                function attachNativeButton(v) {
-                    if (!v || v.dataset.hasNativeBtn) return;
-                    v.dataset.hasNativeBtn = 'true';
-                    v.setAttribute('playsinline', 'true');
-                    v.setAttribute('webkit-playsinline', 'true');
+                var btnId = '__sniff_floating_btn__';
 
-                    v.addEventListener('play', function() {
-                        var src = v.currentSrc || v.src;
-                        if (src && src.indexOf('blob:') !== 0) {
+                function extractVideoSrc(v) {
+                    if (v.currentSrc && v.currentSrc.indexOf('blob:') !== 0) return v.currentSrc;
+                    if (v.src && v.src.indexOf('blob:') !== 0) return v.src;
+                    var sources = v.querySelectorAll('source');
+                    for (var i = 0; i < sources.length; i++) {
+                        var s = sources[i].src;
+                        if (s && s.indexOf('blob:') !== 0) return s;
+                    }
+                    return null;
+                }
+
+                function createFloatingBtn(src) {
+                    if (document.getElementById(btnId)) return;
+                    var btn = document.createElement('div');
+                    btn.id = btnId;
+                    btn.innerHTML = `
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="white" style="margin-left: 3px; pointer-events: none;"><path d="M8 5v14l11-7z"/></svg>
+                        <div style="position: absolute; top: 1px; right: 1px; width: 10px; height: 10px; background-color: #FF3B30; border-radius: 50%; pointer-events: none;"></div>
+                    `;
+                    btn.style.cssText = `
+                        position: fixed;
+                        right: 16px;
+                        bottom: 120px;
+                        width: 50px;
+                        height: 50px;
+                        border-radius: 50%;
+                        background: #4299E1;
+                        box-shadow: 0 4px 14px rgba(0,0,0,0.3);
+                        z-index: 999999;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        cursor: pointer;
+                        user-select: none;
+                        -webkit-user-select: none;
+                        -webkit-tap-highlight-color: transparent;
+                    `;
+
+                    var isDragging = false;
+                    var startX, startY, initialX, initialY;
+
+                    btn.addEventListener('touchstart', function(e) {
+                        var touch = e.touches[0];
+                        startX = touch.clientX;
+                        startY = touch.clientY;
+                        var rect = btn.getBoundingClientRect();
+                        initialX = rect.left;
+                        initialY = rect.top;
+                        isDragging = false;
+                    }, {passive: true});
+
+                    btn.addEventListener('touchmove', function(e) {
+                        var touch = e.touches[0];
+                        var dx = touch.clientX - startX;
+                        var dy = touch.clientY - startY;
+                        if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+                            isDragging = true;
+                        }
+                        if (isDragging) {
+                            btn.style.left = (initialX + dx) + 'px';
+                            btn.style.top = (initialY + dy) + 'px';
+                            btn.style.right = 'auto';
+                            btn.style.bottom = 'auto';
+                        }
+                    }, {passive: true});
+
+                    btn.addEventListener('touchend', function(e) {
+                        if (!isDragging) {
                             try {
                                 window.webkit.messageHandlers.VideoHelper.postMessage({
                                     action: 'openCustomPlayer',
                                     url: src
                                 });
-                                v.pause();
-                            } catch(e) {}
+                            } catch(err) {}
                         }
                     });
+
+                    (document.body || document.documentElement).appendChild(btn);
                 }
 
-                var videos = document.querySelectorAll('video');
-                for (var i = 0; i < videos.length; i++) {
-                    attachNativeButton(videos[i]);
-                }
-
-                var observer = new MutationObserver(function(mutations) {
-                    for (var i = 0; i < mutations.length; i++) {
-                        var added = mutations[i].addedNodes;
-                        for (var j = 0; j < added.length; j++) {
-                            var node = added[j];
-                            if (node.tagName === 'VIDEO') {
-                                attachNativeButton(node);
-                            } else if (node.querySelectorAll) {
-                                var innerVideos = node.querySelectorAll('video');
-                                for (var k = 0; k < innerVideos.length; k++) {
-                                    attachNativeButton(innerVideos[k]);
-                                }
-                            }
+                function sniffVideos() {
+                    var videos = document.querySelectorAll('video');
+                    for (var i = 0; i < videos.length; i++) {
+                        var src = extractVideoSrc(videos[i]);
+                        if (src) {
+                            createFloatingBtn(src);
+                            break;
                         }
                     }
+                }
+
+                sniffVideos();
+
+                var observer = new MutationObserver(function() {
+                    sniffVideos();
                 });
 
                 observer.observe(document.documentElement || document.body, {
