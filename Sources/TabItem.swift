@@ -241,6 +241,7 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         (function() {
             try {
                 var btnId = '__sniff_floating_btn__';
+                var redDotId = '__sniff_red_dot__';
                 var lastSniffedUrl = null;
 
                 function isValidMediaUrl(url) {
@@ -256,10 +257,16 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
 
                 function createFloatingBtn(src) {
                     if (!src) return;
+                    var isNew = (src !== lastSniffedUrl);
                     lastSniffedUrl = src;
+
                     var existing = document.getElementById(btnId);
                     if (existing) {
                         existing.dataset.videoUrl = src;
+                        if (isNew) {
+                            var dot = document.getElementById(redDotId);
+                            if (dot) dot.style.display = 'block';
+                        }
                         return;
                     }
 
@@ -267,15 +274,15 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
                     btn.id = btnId;
                     btn.dataset.videoUrl = src;
                     btn.innerHTML = `
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="white" style="margin-left: 2px; pointer-events: none;"><path d="M8 5v14l11-7z"/></svg>
-                        <div style="position: absolute; top: -1px; right: -1px; width: 12px; height: 12px; background-color: #FF3B30; border: 2px solid #ffffff; border-radius: 50%; pointer-events: none;"></div>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="white" style="margin-left: 2px; pointer-events: none;"><path d="M8 5v14l11-7z"/></svg>
+                        <div id="${redDotId}" style="position: absolute; top: -1px; right: -1px; width: 10px; height: 10px; background-color: #FF3B30; border: 2px solid #ffffff; border-radius: 50%; pointer-events: none;"></div>
                     `;
                     btn.style.cssText = `
                         position: fixed;
                         right: 18px;
                         bottom: 120px;
-                        width: 52px;
-                        height: 52px;
+                        width: 45px;
+                        height: 45px;
                         border-radius: 50%;
                         background: linear-gradient(135deg, #3B82F6 0%, #1D4ED8 100%);
                         box-shadow: 0 8px 24px rgba(29, 78, 216, 0.45);
@@ -305,6 +312,8 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
                     }, {passive: true});
 
                     btn.addEventListener('touchmove', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
                         var touch = e.touches[0];
                         var dx = touch.clientX - startX;
                         var dy = touch.clientY - startY;
@@ -317,12 +326,15 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
                             btn.style.right = 'auto';
                             btn.style.bottom = 'auto';
                         }
-                    }, {passive: true});
+                    }, {passive: false});
 
                     btn.addEventListener('touchend', function(e) {
                         btn.style.transform = 'scale(1.0)';
                         if (!isDragging) {
                             var currentSrc = btn.dataset.videoUrl || lastSniffedUrl;
+                            var dot = document.getElementById(redDotId);
+                            if (dot) dot.style.display = 'none';
+
                             if (currentSrc) {
                                 try {
                                     window.webkit.messageHandlers.VideoHelper.postMessage({
