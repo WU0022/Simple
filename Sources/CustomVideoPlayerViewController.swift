@@ -3,7 +3,128 @@ import AVFoundation
 import AVKit
 import MediaPlayer
 
-final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictureControllerDelegate {
+enum VideoProgressInteractionPhase {
+    case began
+    case changed
+    case ended
+}
+
+final class VideoProgressBar: UIControl {
+    var progress: Float = 0 {
+        didSet {
+            progress = min(max(progress, 0), 1)
+            setNeedsLayout()
+        }
+    }
+
+    var bufferedProgress: Float = 0 {
+        didSet {
+            bufferedProgress = min(max(bufferedProgress, 0), 1)
+            setNeedsLayout()
+        }
+    }
+
+    var onProgressChanged: ((Float, VideoProgressInteractionPhase) -> Void)?
+
+    private let trackView = UIView()
+    private let bufferView = UIView()
+    private let playedView = UIView()
+    private var isTrackingProgress = false
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+
+        trackView.backgroundColor = UIColor.white.withAlphaComponent(0.2)
+        bufferView.backgroundColor = UIColor.white.withAlphaComponent(0.45)
+        playedView.backgroundColor = .white
+
+        addSubview(trackView)
+        addSubview(bufferView)
+        addSubview(playedView)
+
+        isExclusiveTouch = true
+        accessibilityTraits = .adjustable
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+
+        let height: CGFloat = isTrackingProgress ? 8 : 5
+        let y = (bounds.height - height) * 0.5
+        let trackFrame = CGRect(x: 0, y: y, width: bounds.width, height: height)
+
+        trackView.frame = trackFrame
+        bufferView.frame = CGRect(
+            x: trackFrame.minX,
+            y: trackFrame.minY,
+            width: trackFrame.width * CGFloat(bufferedProgress),
+            height: trackFrame.height
+        )
+        playedView.frame = CGRect(
+            x: trackFrame.minX,
+            y: trackFrame.minY,
+            width: trackFrame.width * CGFloat(progress),
+            height: trackFrame.height
+        )
+
+        let radius = height * 0.5
+        trackView.layer.cornerRadius = radius
+        bufferView.layer.cornerRadius = radius
+        playedView.layer.cornerRadius = radius
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = touches.first else {
+            return
+        }
+
+        isTrackingProgress = true
+        updateProgress(with: touch)
+        onProgressChanged?(progress, .began)
+        setNeedsLayout()
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = touches.first else {
+            return
+        }
+
+        updateProgress(with: touch)
+        onProgressChanged?(progress, .changed)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = touches.first else {
+            return
+        }
+
+        updateProgress(with: touch)
+        isTrackingProgress = false
+        onProgressChanged?(progress, .ended)
+        setNeedsLayout()
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        isTrackingProgress = false
+        onProgressChanged?(progress, .ended)
+        setNeedsLayout()
+    }
+
+    private func updateProgress(with touch: UITouch) {
+        guard bounds.width > 0 else {
+            return
+        }
+
+        let point = touch.location(in: self)
+        progress = Float(min(max(point.x / bounds.width, 0), 1))
+    }
+}
+
+final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictureControllerDelegate, UIGestureRecognizerDelegate {
     private let videoURL: URL
     private var player: AVPlayer?
     private var playerItem: AVPlayerItem?
@@ -41,20 +162,17 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
     private let topBar = UIView()
     private let bottomBar = UIView()
 
-    private let closeButton = TouchButton()
-    private let titleLabel = UILabel()
     private let systemTimeLabel = UILabel()
     private let netSpeedLabel = UILabel()
+    private let closeButton = TouchButton()
+    private let titleLabel = UILabel()
     private let lockButton = TouchButton()
     private let pipButton = TouchButton()
     private let aspectButton = TouchButton()
 
     private let currentTimeLabel = UILabel()
-    private let bufferProgressView = UIProgressView(progressViewStyle: .default)
-    private let progressSlider = UISlider()
+    private let videoProgressBar = VideoProgressBar()
     private let totalTimeLabel = UILabel()
-
-    private var barHeightConstraint: NSLayoutConstraint?
 
     private let playPauseButton = TouchButton()
     private let skipForwardButton = TouchButton()
@@ -105,7 +223,7 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         playerLayer?.frame = playerView.bounds
-        topGradientLayer.frame = CGRect(x: 0, y: 0, width: view.bounds.width, height: 120)
+        topGradientLayer.frame = CGRect(x: 0, y: 0, width: view.bounds.width, height: 130)
         bottomGradientLayer.frame = CGRect(x: 0, y: view.bounds.height - 140, width: view.bounds.width, height: 140)
     }
 
@@ -157,97 +275,105 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
             controlsOverlay.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             controlsOverlay.bottomAnchor.constraint(equalTo: view.bottomAnchor),
 
-            topBar.topAnchor.constraint(equalTo: controlsOverlay.safeAreaLayoutGuide.topAnchor, constant: 4),
-            topBar.leadingAnchor.constraint(equalTo: controlsOverlay.safeAreaLayoutGuide.leadingAnchor, constant: 16),
-            topBar.trailingAnchor.constraint(equalTo: controlsOverlay.safeAreaLayoutGuide.trailingAnchor, constant: -16),
-            topBar.heightAnchor.constraint(equalToConstant: 44),
+            topBar.topAnchor.constraint(equalTo: controlsOverlay.safeAreaLayoutGuide.topAnchor, constant: 6),
+            topBar.leadingAnchor.constraint(equalTo: controlsOverlay.safeAreaLayoutGuide.leadingAnchor, constant: 18),
+            topBar.trailingAnchor.constraint(equalTo: controlsOverlay.safeAreaLayoutGuide.trailingAnchor, constant: -18),
+            topBar.heightAnchor.constraint(equalToConstant: 76),
 
-            bottomBar.bottomAnchor.constraint(equalTo: controlsOverlay.safeAreaLayoutGuide.bottomAnchor, constant: -8),
-            bottomBar.leadingAnchor.constraint(equalTo: controlsOverlay.safeAreaLayoutGuide.leadingAnchor, constant: 16),
-            bottomBar.trailingAnchor.constraint(equalTo: controlsOverlay.safeAreaLayoutGuide.trailingAnchor, constant: -16),
-            bottomBar.heightAnchor.constraint(equalToConstant: 80)
+            bottomBar.bottomAnchor.constraint(equalTo: controlsOverlay.safeAreaLayoutGuide.bottomAnchor, constant: -2),
+            bottomBar.leadingAnchor.constraint(equalTo: controlsOverlay.safeAreaLayoutGuide.leadingAnchor, constant: 18),
+            bottomBar.trailingAnchor.constraint(equalTo: controlsOverlay.safeAreaLayoutGuide.trailingAnchor, constant: -18),
+            bottomBar.heightAnchor.constraint(equalToConstant: 98)
         ])
 
         systemTimeLabel.translatesAutoresizingMaskIntoConstraints = false
         systemTimeLabel.textColor = .white
-        systemTimeLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .bold)
+        systemTimeLabel.font = .monospacedDigitSystemFont(ofSize: 14, weight: .bold)
+        systemTimeLabel.textAlignment = .left
+
+        netSpeedLabel.translatesAutoresizingMaskIntoConstraints = false
+        netSpeedLabel.textColor = .white
+        netSpeedLabel.font = .monospacedDigitSystemFont(ofSize: 14, weight: .bold)
+        netSpeedLabel.textAlignment = .right
+        netSpeedLabel.text = "0 KB/s"
 
         var closeConfig = UIButton.Configuration.plain()
-        closeConfig.image = UIImage(systemName: "xmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .bold))
+        closeConfig.image = UIImage(systemName: "xmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .bold))
         closeConfig.baseForegroundColor = .white
+        closeConfig.contentInsets = .zero
         closeButton.configuration = closeConfig
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         closeButton.addTarget(self, action: #selector(handleClose), for: .touchUpInside)
 
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.textColor = .white
-        titleLabel.font = .systemFont(ofSize: 14, weight: .bold)
+        titleLabel.font = .systemFont(ofSize: 16, weight: .bold)
         titleLabel.lineBreakMode = .byTruncatingTail
 
-        netSpeedLabel.translatesAutoresizingMaskIntoConstraints = false
-        netSpeedLabel.textColor = .white
-        netSpeedLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
-        netSpeedLabel.text = "0.0 KB/s"
-
         var lockConfig = UIButton.Configuration.plain()
-        lockConfig.image = UIImage(systemName: "lock.open.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 16, weight: .regular))
+        lockConfig.image = UIImage(systemName: "lock.open.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .regular))
         lockConfig.baseForegroundColor = .white
+        lockConfig.contentInsets = .zero
         lockButton.configuration = lockConfig
         lockButton.translatesAutoresizingMaskIntoConstraints = false
         lockButton.addTarget(self, action: #selector(handleLockToggle), for: .touchUpInside)
 
         var pipConfig = UIButton.Configuration.plain()
-        pipConfig.image = UIImage(systemName: "pip.enter", withConfiguration: UIImage.SymbolConfiguration(pointSize: 16, weight: .regular))
+        pipConfig.image = UIImage(systemName: "pip.enter", withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .regular))
         pipConfig.baseForegroundColor = .white
+        pipConfig.contentInsets = .zero
         pipButton.configuration = pipConfig
         pipButton.translatesAutoresizingMaskIntoConstraints = false
         pipButton.addTarget(self, action: #selector(handlePipToggle), for: .touchUpInside)
 
         var aspectConfig = UIButton.Configuration.plain()
-        aspectConfig.image = UIImage(systemName: "aspectratio", withConfiguration: UIImage.SymbolConfiguration(pointSize: 16, weight: .regular))
+        aspectConfig.image = UIImage(systemName: "aspectratio", withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .regular))
         aspectConfig.baseForegroundColor = .white
+        aspectConfig.contentInsets = .zero
         aspectButton.configuration = aspectConfig
         aspectButton.translatesAutoresizingMaskIntoConstraints = false
         aspectButton.addTarget(self, action: #selector(handleAspectToggle), for: .touchUpInside)
 
-        topBar.addSubview(closeButton)
-        topBar.addSubview(titleLabel)
         topBar.addSubview(systemTimeLabel)
         topBar.addSubview(netSpeedLabel)
+        topBar.addSubview(closeButton)
+        topBar.addSubview(titleLabel)
         topBar.addSubview(lockButton)
         topBar.addSubview(pipButton)
         topBar.addSubview(aspectButton)
 
         NSLayoutConstraint.activate([
+            systemTimeLabel.leadingAnchor.constraint(equalTo: topBar.leadingAnchor),
+            systemTimeLabel.topAnchor.constraint(equalTo: topBar.topAnchor),
+            systemTimeLabel.heightAnchor.constraint(equalToConstant: 20),
+
+            netSpeedLabel.trailingAnchor.constraint(equalTo: topBar.trailingAnchor),
+            netSpeedLabel.topAnchor.constraint(equalTo: topBar.topAnchor),
+            netSpeedLabel.heightAnchor.constraint(equalToConstant: 20),
+
             closeButton.leadingAnchor.constraint(equalTo: topBar.leadingAnchor),
-            closeButton.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
-            closeButton.widthAnchor.constraint(equalToConstant: 32),
-            closeButton.heightAnchor.constraint(equalToConstant: 32),
+            closeButton.bottomAnchor.constraint(equalTo: topBar.bottomAnchor),
+            closeButton.widthAnchor.constraint(equalToConstant: 38),
+            closeButton.heightAnchor.constraint(equalToConstant: 38),
 
             titleLabel.leadingAnchor.constraint(equalTo: closeButton.trailingAnchor, constant: 8),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: systemTimeLabel.leadingAnchor, constant: -8),
-            titleLabel.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
+            titleLabel.trailingAnchor.constraint(equalTo: lockButton.leadingAnchor, constant: -12),
+            titleLabel.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
 
             aspectButton.trailingAnchor.constraint(equalTo: topBar.trailingAnchor),
-            aspectButton.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
-            aspectButton.widthAnchor.constraint(equalToConstant: 32),
-            aspectButton.heightAnchor.constraint(equalToConstant: 32),
+            aspectButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+            aspectButton.widthAnchor.constraint(equalToConstant: 36),
+            aspectButton.heightAnchor.constraint(equalToConstant: 36),
 
-            pipButton.trailingAnchor.constraint(equalTo: aspectButton.leadingAnchor, constant: -6),
-            pipButton.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
-            pipButton.widthAnchor.constraint(equalToConstant: 32),
-            pipButton.heightAnchor.constraint(equalToConstant: 32),
+            pipButton.trailingAnchor.constraint(equalTo: aspectButton.leadingAnchor, constant: -8),
+            pipButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+            pipButton.widthAnchor.constraint(equalToConstant: 36),
+            pipButton.heightAnchor.constraint(equalToConstant: 36),
 
-            lockButton.trailingAnchor.constraint(equalTo: pipButton.leadingAnchor, constant: -6),
-            lockButton.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
-            lockButton.widthAnchor.constraint(equalToConstant: 32),
-            lockButton.heightAnchor.constraint(equalToConstant: 32),
-
-            netSpeedLabel.trailingAnchor.constraint(equalTo: lockButton.leadingAnchor, constant: -12),
-            netSpeedLabel.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
-
-            systemTimeLabel.trailingAnchor.constraint(equalTo: netSpeedLabel.leadingAnchor, constant: -12),
-            systemTimeLabel.centerYAnchor.constraint(equalTo: topBar.centerYAnchor)
+            lockButton.trailingAnchor.constraint(equalTo: pipButton.leadingAnchor, constant: -8),
+            lockButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+            lockButton.widthAnchor.constraint(equalToConstant: 36),
+            lockButton.heightAnchor.constraint(equalToConstant: 36)
         ])
 
         currentTimeLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -255,19 +381,10 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
         currentTimeLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .bold)
         currentTimeLabel.text = "00:00"
 
-        bufferProgressView.translatesAutoresizingMaskIntoConstraints = false
-        bufferProgressView.progressTintColor = UIColor.white.withAlphaComponent(0.4)
-        bufferProgressView.trackTintColor = UIColor.white.withAlphaComponent(0.2)
-        bufferProgressView.layer.cornerRadius = 2
-        bufferProgressView.clipsToBounds = true
-
-        progressSlider.translatesAutoresizingMaskIntoConstraints = false
-        progressSlider.minimumTrackTintColor = .white
-        progressSlider.maximumTrackTintColor = .clear
-
-        let transparentImage = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1)).image { _ in }
-        progressSlider.setThumbImage(transparentImage, for: .normal)
-        progressSlider.addTarget(self, action: #selector(handleSliderValueChanged(_:event:)), for: .valueChanged)
+        videoProgressBar.translatesAutoresizingMaskIntoConstraints = false
+        videoProgressBar.onProgressChanged = { [weak self] progress, phase in
+            self?.handleProgressInteraction(progress: progress, phase: phase)
+        }
 
         totalTimeLabel.translatesAutoresizingMaskIntoConstraints = false
         totalTimeLabel.textColor = .white
@@ -324,8 +441,7 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
         speedButton.addTarget(self, action: #selector(handleSpeedSelect), for: .touchUpInside)
 
         bottomBar.addSubview(currentTimeLabel)
-        bottomBar.addSubview(bufferProgressView)
-        bottomBar.addSubview(progressSlider)
+        bottomBar.addSubview(videoProgressBar)
         bottomBar.addSubview(totalTimeLabel)
 
         bottomBar.addSubview(playPauseButton)
@@ -334,21 +450,14 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
         bottomBar.addSubview(preloadButton)
         bottomBar.addSubview(speedButton)
 
-        barHeightConstraint = bufferProgressView.heightAnchor.constraint(equalToConstant: 4)
-
         NSLayoutConstraint.activate([
             currentTimeLabel.leadingAnchor.constraint(equalTo: bottomBar.leadingAnchor),
             currentTimeLabel.topAnchor.constraint(equalTo: bottomBar.topAnchor, constant: 4),
 
-            bufferProgressView.leadingAnchor.constraint(equalTo: currentTimeLabel.trailingAnchor, constant: 12),
-            bufferProgressView.trailingAnchor.constraint(equalTo: totalTimeLabel.leadingAnchor, constant: -12),
-            bufferProgressView.centerYAnchor.constraint(equalTo: currentTimeLabel.centerYAnchor),
-            barHeightConstraint!,
-
-            progressSlider.leadingAnchor.constraint(equalTo: bufferProgressView.leadingAnchor),
-            progressSlider.trailingAnchor.constraint(equalTo: bufferProgressView.trailingAnchor),
-            progressSlider.centerYAnchor.constraint(equalTo: bufferProgressView.centerYAnchor),
-            progressSlider.heightAnchor.constraint(equalToConstant: 24),
+            videoProgressBar.leadingAnchor.constraint(equalTo: currentTimeLabel.trailingAnchor, constant: 14),
+            videoProgressBar.trailingAnchor.constraint(equalTo: totalTimeLabel.leadingAnchor, constant: -14),
+            videoProgressBar.centerYAnchor.constraint(equalTo: currentTimeLabel.centerYAnchor),
+            videoProgressBar.heightAnchor.constraint(equalToConstant: 32),
 
             totalTimeLabel.trailingAnchor.constraint(equalTo: bottomBar.trailingAnchor),
             totalTimeLabel.topAnchor.constraint(equalTo: bottomBar.topAnchor, constant: 4),
@@ -426,9 +535,11 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
     private func setupGestures() {
         let singleTap = UITapGestureRecognizer(target: self, action: #selector(handleSingleTap))
         singleTap.numberOfTapsRequired = 1
+        singleTap.delegate = self
 
         let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap))
         doubleTap.numberOfTapsRequired = 2
+        doubleTap.delegate = self
 
         singleTap.require(toFail: doubleTap)
 
@@ -436,6 +547,7 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
         view.addGestureRecognizer(doubleTap)
 
         let panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePanGesture(_:)))
+        panGesture.delegate = self
         view.addGestureRecognizer(panGesture)
     }
 
@@ -503,7 +615,7 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
             activityIndicator.stopAnimating()
         }
 
-        progressSlider.value = Float(currentSeconds / totalSeconds)
+        videoProgressBar.progress = Float(currentSeconds / totalSeconds)
         currentTimeLabel.text = formatTime(seconds: currentSeconds)
         totalTimeLabel.text = formatTime(seconds: totalSeconds)
     }
@@ -519,7 +631,7 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
             if let duration = item.duration.isNumeric ? item.duration : nil {
                 let totalSeconds = CMTimeGetSeconds(duration)
                 if totalSeconds > 0 {
-                    bufferProgressView.progress = Float(totalBuffer / totalSeconds)
+                    videoProgressBar.bufferedProgress = Float(totalBuffer / totalSeconds)
                 }
             }
         }
@@ -553,12 +665,35 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
         }
     }
 
-    private func setProgressBarExpanded(_ expanded: Bool) {
-        barHeightConstraint?.constant = expanded ? 7 : 4
-        bufferProgressView.layer.cornerRadius = expanded ? 3.5 : 2
-        UIView.animate(withDuration: 0.15) {
-            self.view.layoutIfNeeded()
+    private func handleProgressInteraction(progress: Float, phase: VideoProgressInteractionPhase) {
+        guard let duration = player?.currentItem?.duration, duration.isNumeric else { return }
+        let totalSeconds = CMTimeGetSeconds(duration)
+        let targetSeconds = totalSeconds * Double(progress)
+        let targetTime = CMTime(seconds: targetSeconds, preferredTimescale: 600)
+
+        switch phase {
+        case .began:
+            isSeeking = true
+            controlsTimer?.invalidate()
+            currentTimeLabel.text = formatTime(seconds: targetSeconds)
+        case .changed:
+            currentTimeLabel.text = formatTime(seconds: targetSeconds)
+        case .ended:
+            player?.seek(to: targetTime, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+                self?.isSeeking = false
+                self?.resetControlsTimer(delay: 1.0)
+            }
         }
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        if touch.view?.isDescendant(of: videoProgressBar) == true {
+            return false
+        }
+        if touch.view?.isDescendant(of: topBar) == true || touch.view?.isDescendant(of: bottomBar) == true {
+            return false
+        }
+        return true
     }
 
     @objc private func handleClose() {
@@ -730,32 +865,6 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
         }
     }
 
-    @objc private func handleSliderValueChanged(_ slider: UISlider, event: UIEvent) {
-        guard let duration = player?.currentItem?.duration, duration.isNumeric else { return }
-        let totalSeconds = CMTimeGetSeconds(duration)
-        let targetSeconds = totalSeconds * Double(slider.value)
-        let targetTime = CMTime(seconds: targetSeconds, preferredTimescale: 600)
-
-        if let touch = event.allTouches?.first {
-            switch touch.phase {
-            case .began:
-                isSeeking = true
-                controlsTimer?.invalidate()
-                setProgressBarExpanded(true)
-            case .moved:
-                currentTimeLabel.text = formatTime(seconds: targetSeconds)
-            case .ended, .cancelled:
-                setProgressBarExpanded(false)
-                player?.seek(to: targetTime, completionHandler: { [weak self] _ in
-                    self?.isSeeking = false
-                    self?.resetControlsTimer(delay: 1.0)
-                })
-            default:
-                break
-            }
-        }
-    }
-
     @objc private func handlePanGesture(_ gesture: UIPanGestureRecognizer) {
         guard !isLocked else { return }
         let location = gesture.location(in: view)
@@ -768,7 +877,6 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
                 panDirection = .horizontal
                 panStartSeekTime = player?.currentTime() ?? .zero
                 isSeeking = true
-                setProgressBarExpanded(true)
             } else {
                 if location.x < view.bounds.width / 2 {
                     panDirection = .verticalLeft
@@ -787,7 +895,7 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
                 let currentSeconds = CMTimeGetSeconds(panStartSeekTime)
                 let targetSeconds = min(max(0, currentSeconds + deltaSeconds), totalSeconds)
 
-                progressSlider.value = Float(targetSeconds / totalSeconds)
+                videoProgressBar.progress = Float(targetSeconds / totalSeconds)
                 currentTimeLabel.text = formatTime(seconds: targetSeconds)
             case .verticalLeft:
                 let delta = -translation.y / view.bounds.height
@@ -804,7 +912,6 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
             }
         case .ended, .cancelled:
             if panDirection == .horizontal {
-                setProgressBarExpanded(false)
                 guard let duration = player?.currentItem?.duration, duration.isNumeric else { return }
                 let totalSeconds = CMTimeGetSeconds(duration)
                 let deltaSeconds = Double(translation.x / view.bounds.width) * 90.0
@@ -812,7 +919,7 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
                 let targetSeconds = min(max(0, currentSeconds + deltaSeconds), totalSeconds)
                 let targetTime = CMTime(seconds: targetSeconds, preferredTimescale: 600)
 
-                player?.seek(to: targetTime, completionHandler: { [weak self] _ in
+                player?.seek(to: targetTime, toleranceBefore: .zero, toleranceAfter: .zero, completionHandler: { [weak self] _ in
                     self?.isSeeking = false
                     self?.resetControlsTimer(delay: 1.0)
                 })
