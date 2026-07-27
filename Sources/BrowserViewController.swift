@@ -584,6 +584,12 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         ])
     }
 
+    @objc private func handleMoreButtonLongPress(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began else { return }
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        showCleanDataMenu()
+    }
+
     private func showToastNotice(_ text: String) {
         let toast = UILabel()
         toast.text = "  \(text)  "
