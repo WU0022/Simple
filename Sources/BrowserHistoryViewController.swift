@@ -1,8 +1,13 @@
 import UIKit
 
+struct HistorySection {
+    let title: String
+    let items: [BrowserHistoryItem]
+}
+
 final class BrowserHistoryViewController: UITableViewController, UISearchResultsUpdating {
     private var allItems: [BrowserHistoryItem] = []
-    private var filteredItems: [BrowserHistoryItem] = []
+    private var sections: [HistorySection] = []
     private let searchController = UISearchController(searchResultsController: nil)
 
     var onSelectURL: ((URL) -> Void)?
@@ -38,7 +43,50 @@ final class BrowserHistoryViewController: UITableViewController, UISearchResults
 
     private func loadData() {
         allItems = BrowserHistoryStore.shared.loadHistory()
-        updateSearchResults(for: searchController)
+        filterAndGroupHistory(query: "")
+    }
+
+    private func filterAndGroupHistory(query: String) {
+        let filtered: [BrowserHistoryItem]
+        if query.isEmpty {
+            filtered = allItems
+        } else {
+            filtered = allItems.filter {
+                $0.title.lowercased().contains(query) ||
+                $0.urlString.lowercased().contains(query)
+            }
+        }
+
+        var todayItems: [BrowserHistoryItem] = []
+        var yesterdayItems: [BrowserHistoryItem] = []
+        var earlierItems: [BrowserHistoryItem] = []
+
+        let calendar = Calendar.current
+        let now = Date()
+
+        for item in filtered {
+            if calendar.isDateInToday(item.visitedAt) {
+                todayItems.append(item)
+            } else if calendar.isDateInYesterday(item.visitedAt) {
+                yesterdayItems.append(item)
+            } else {
+                earlierItems.append(item)
+            }
+        }
+
+        var newSections: [HistorySection] = []
+        if !todayItems.isEmpty {
+            newSections.append(HistorySection(title: "今天", items: todayItems))
+        }
+        if !yesterdayItems.isEmpty {
+            newSections.append(HistorySection(title: "昨天", items: yesterdayItems))
+        }
+        if !earlierItems.isEmpty {
+            newSections.append(HistorySection(title: "更早", items: earlierItems))
+        }
+
+        self.sections = newSections
+        tableView.reloadData()
     }
 
     @objc private func handleClose() {
@@ -69,21 +117,19 @@ final class BrowserHistoryViewController: UITableViewController, UISearchResults
         let query = searchController.searchBar.text?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased() ?? ""
+        filterAndGroupHistory(query: query)
+    }
 
-        if query.isEmpty {
-            filteredItems = allItems
-        } else {
-            filteredItems = allItems.filter {
-                $0.title.lowercased().contains(query) ||
-                $0.urlString.lowercased().contains(query)
-            }
-        }
-
-        tableView.reloadData()
+    override func numberOfSections(in tableView: UITableView) -> Int {
+        return sections.count
     }
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        filteredItems.count
+        return sections[section].items.count
+    }
+
+    override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
+        return sections[section].title
     }
 
     override func tableView(
@@ -95,16 +141,38 @@ final class BrowserHistoryViewController: UITableViewController, UISearchResults
             for: indexPath
         )
 
-        let item = filteredItems[indexPath.row]
+        let item = sections[indexPath.section].items[indexPath.row]
 
         var content = cell.defaultContentConfiguration()
         content.text = item.title
         content.secondaryText = "\(item.urlString)\n\(formattedDate(item.visitedAt))"
         content.secondaryTextProperties.numberOfLines = 2
         content.textProperties.numberOfLines = 1
+        content.image = UIImage(systemName: "globe")
+        content.imageProperties.maximumSize = CGSize(width: 24, height: 24)
+        content.imageProperties.cornerRadius = 4
 
         cell.contentConfiguration = content
         cell.accessoryType = .disclosureIndicator
+
+        if let url = URL(string: item.urlString), let host = url.host {
+            FaviconLoader.shared.loadFavicon(for: host) { [weak tableView] image in
+                guard let image = image else { return }
+                DispatchQueue.main.async {
+                    if let currentCell = tableView?.cellForRow(at: indexPath) {
+                        var updatedContent = currentCell.defaultContentConfiguration()
+                        updatedContent.text = item.title
+                        updatedContent.secondaryText = "\(item.urlString)\n\(self.formattedDate(item.visitedAt))"
+                        updatedContent.secondaryTextProperties.numberOfLines = 2
+                        updatedContent.textProperties.numberOfLines = 1
+                        updatedContent.image = image
+                        updatedContent.imageProperties.maximumSize = CGSize(width: 24, height: 24)
+                        updatedContent.imageProperties.cornerRadius = 4
+                        currentCell.contentConfiguration = updatedContent
+                    }
+                }
+            }
+        }
 
         return cell
     }
@@ -115,7 +183,7 @@ final class BrowserHistoryViewController: UITableViewController, UISearchResults
     ) {
         tableView.deselectRow(at: indexPath, animated: true)
 
-        let item = filteredItems[indexPath.row]
+        let item = sections[indexPath.section].items[indexPath.row]
 
         guard let url = URL(string: item.urlString) else {
             return
@@ -130,7 +198,7 @@ final class BrowserHistoryViewController: UITableViewController, UISearchResults
         _ tableView: UITableView,
         trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath
     ) -> UISwipeActionsConfiguration? {
-        let item = filteredItems[indexPath.row]
+        let item = sections[indexPath.section].items[indexPath.row]
 
         let deleteAction = UIContextualAction(
             style: .destructive,
