@@ -69,6 +69,9 @@ final class WebsiteDataManagerViewController: UITableViewController, UISearchRes
 
         var content = cell.defaultContentConfiguration()
         content.text = record.displayName
+        content.image = UIImage(systemName: "globe")
+        content.imageProperties.maximumSize = CGSize(width: 24, height: 24)
+        content.imageProperties.cornerRadius = 4
         cell.contentConfiguration = content
         cell.selectionStyle = .none
 
@@ -78,6 +81,20 @@ final class WebsiteDataManagerViewController: UITableViewController, UISearchRes
             cell.accessoryView = lockView
         } else {
             cell.accessoryView = nil
+        }
+
+        FaviconLoader.shared.loadFavicon(for: record.displayName) { [weak tableView] image in
+            guard let image = image else { return }
+            DispatchQueue.main.async {
+                if let currentCell = tableView?.cellForRow(at: indexPath) {
+                    var updatedContent = currentCell.defaultContentConfiguration()
+                    updatedContent.text = record.displayName
+                    updatedContent.image = image
+                    updatedContent.imageProperties.maximumSize = CGSize(width: 24, height: 24)
+                    updatedContent.imageProperties.cornerRadius = 4
+                    currentCell.contentConfiguration = updatedContent
+                }
+            }
         }
 
         return cell
@@ -198,7 +215,7 @@ final class UserAgentManagerViewController: UITableViewController {
     var onUASelected: ((UserAgentItem) -> Void)?
 
     init() {
-        super.init(style: .grouped)
+        super.init(style: .insetGrouped)
     }
 
     required init?(coder: NSCoder) { nil }
@@ -206,7 +223,9 @@ final class UserAgentManagerViewController: UITableViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "浏览器标识"
-        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "UACell")
+        tableView.separatorStyle = .none
+        tableView.backgroundColor = .systemGroupedBackground
+        tableView.register(UserAgentCardCell.self, forCellReuseIdentifier: "UserAgentCardCell")
 
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             image: UIImage(systemName: "plus"),
@@ -317,18 +336,14 @@ final class UserAgentManagerViewController: UITableViewController {
         }
     }
 
+    override func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
+        return 68
+    }
+
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: "UACell", for: indexPath)
+        let cell = tableView.dequeueReusableCell(withIdentifier: "UserAgentCardCell", for: indexPath) as! UserAgentCardCell
         let item = self.item(for: indexPath)
-
-        var content = cell.defaultContentConfiguration()
-        content.text = item.name
-        content.secondaryText = item.uaString
-        content.secondaryTextProperties.numberOfLines = 1
-        content.secondaryTextProperties.color = .secondaryLabel
-        cell.contentConfiguration = content
-
-        cell.accessoryType = item.id == selectedId ? .checkmark : .none
+        cell.configure(item: item, isSelected: item.id == selectedId)
         return cell
     }
 
@@ -365,6 +380,72 @@ final class UserAgentManagerViewController: UITableViewController {
         } else {
             return UISwipeActionsConfiguration(actions: [editAction])
         }
+    }
+}
+
+final class UserAgentCardCell: UITableViewCell {
+    private let cardView = UIView()
+    private let titleLabel = UILabel()
+    private let subtitleLabel = UILabel()
+    private let checkmarkImageView = UIImageView()
+
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: style, reuseIdentifier: reuseIdentifier)
+        backgroundColor = .clear
+        selectionStyle = .none
+
+        cardView.translatesAutoresizingMaskIntoConstraints = false
+        cardView.backgroundColor = .secondarySystemGroupedBackground
+        cardView.layer.cornerRadius = 12
+        cardView.clipsToBounds = true
+
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+        titleLabel.textColor = .label
+
+        subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
+        subtitleLabel.font = .systemFont(ofSize: 11, weight: .regular)
+        subtitleLabel.textColor = .secondaryLabel
+        subtitleLabel.lineBreakMode = .byTruncatingTail
+
+        checkmarkImageView.translatesAutoresizingMaskIntoConstraints = false
+        checkmarkImageView.image = UIImage(systemName: "checkmark.circle.fill")
+        checkmarkImageView.tintColor = .systemBlue
+        checkmarkImageView.contentMode = .scaleAspectFit
+
+        cardView.addSubview(titleLabel)
+        cardView.addSubview(subtitleLabel)
+        cardView.addSubview(checkmarkImageView)
+        contentView.addSubview(cardView)
+
+        NSLayoutConstraint.activate([
+            cardView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 4),
+            cardView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -4),
+            cardView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 4),
+            cardView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -4),
+
+            checkmarkImageView.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: -16),
+            checkmarkImageView.centerYAnchor.constraint(equalTo: cardView.centerYAnchor),
+            checkmarkImageView.widthAnchor.constraint(equalToConstant: 20),
+            checkmarkImageView.heightAnchor.constraint(equalToConstant: 20),
+
+            titleLabel.topAnchor.constraint(equalTo: cardView.topAnchor, constant: 12),
+            titleLabel.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 16),
+            titleLabel.trailingAnchor.constraint(equalTo: checkmarkImageView.leadingAnchor, constant: -12),
+
+            subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
+            subtitleLabel.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 16),
+            subtitleLabel.trailingAnchor.constraint(equalTo: checkmarkImageView.leadingAnchor, constant: -12),
+            subtitleLabel.bottomAnchor.constraint(equalTo: cardView.bottomAnchor, constant: -12)
+        ])
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    func configure(item: UserAgentItem, isSelected: Bool) {
+        titleLabel.text = item.name
+        subtitleLabel.text = item.uaString
+        checkmarkImageView.isHidden = !isSelected
     }
 }
 
