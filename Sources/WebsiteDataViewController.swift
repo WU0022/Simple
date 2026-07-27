@@ -325,7 +325,7 @@ final class UserAgentManagerViewController: UITableViewController {
         content.text = item.name
         content.secondaryText = item.uaString
         content.secondaryTextProperties.numberOfLines = 1
-        content.secondaryTextProperties.textColor = .secondaryLabel
+        content.secondaryTextProperties.color = .secondaryLabel
         cell.contentConfiguration = content
 
         cell.accessoryType = item.id == selectedId ? .checkmark : .none
