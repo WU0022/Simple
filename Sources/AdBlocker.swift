@@ -1416,28 +1416,36 @@ final class AdBlockManager {
     }
 
     private func urlFilterPattern(from pattern: String) -> String {
-        var regexPattern = ""
-        if pattern.hasPrefix("||") {
-            let domainOnly = String(pattern.dropFirst(2)).replacingOccurrences(of: "^", with: "")
-            let cleanDomain = domainOnly.trimmingCharacters(in: .whitespacesAndNewlines)
-            var escapedDomain = NSRegularExpression.escapedPattern(for: cleanDomain)
-            escapedDomain = escapedDomain.replacingOccurrences(of: "\\*", with: ".*")
-            escapedDomain = escapedDomain.replacingOccurrences(of: "\\^", with: ".*")
-            regexPattern = "^https?://([a-z0-9-]+\\.)*" + escapedDomain + "([/:?#]|$)"
-        } else {
-            var p = pattern.trimmingCharacters(in: .whitespacesAndNewlines)
-            p = p.replacingOccurrences(of: " ", with: "")
-            p = NSRegularExpression.escapedPattern(for: p)
-            p = p.replacingOccurrences(of: "\\*", with: ".*")
-            p = p.replacingOccurrences(of: "\\^", with: ".*")
-            regexPattern = ".*" + p + ".*"
+        var p = pattern.trimmingCharacters(in: .whitespacesAndNewlines)
+        if p.hasPrefix("||") {
+            p = String(p.dropFirst(2))
+        }
+        if p.hasSuffix("^") {
+            p = String(p.dropLast())
+        }
+        p = p.replacingOccurrences(of: "^", with: "")
+
+        let specialChars: [Character] = [".", "/", "?", "=", "-", "_", ":", "+", "$", "{", "}", "[", "]", "(", ")", "|", "\\"]
+        var escaped = ""
+        for char in p {
+            if char == "*" {
+                escaped.append(".*")
+            } else if specialChars.contains(char) {
+                escaped.append("\\\(char)")
+            } else {
+                escaped.append(char)
+            }
         }
 
-        while regexPattern.contains(".*.*") {
-            regexPattern = regexPattern.replacingOccurrences(of: ".*.*", with: ".*")
+        while escaped.contains(".*.*") {
+            escaped = escaped.replacingOccurrences(of: ".*.*", with: ".*")
         }
 
-        return regexPattern
+        if !escaped.hasPrefix(".*") {
+            escaped = ".*" + escaped
+        }
+
+        return escaped
     }
 
     private func jsonString(from rules: [[String: Any]]) -> String? {
