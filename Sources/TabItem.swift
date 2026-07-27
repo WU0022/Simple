@@ -274,69 +274,92 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
                     btn.id = btnId;
                     btn.dataset.videoUrl = src;
                     btn.innerHTML = `
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="white" style="margin-left: 2px; pointer-events: none;"><path d="M8 5v14l11-7z"/></svg>
-                        <div id="${redDotId}" style="position: absolute; top: 0px; right: 0px; width: 8px; height: 8px; background-color: #FF3B30; border: 1.5px solid #ffffff; border-radius: 50%; pointer-events: none;"></div>
+                        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" style="pointer-events:none;">
+                            <path d="M8.2 5.6C8.2 4.9 8.95 4.47 9.55 4.85L19.1 10.96C19.66 11.32 19.66 12.14 19.1 12.5L9.55 18.61C8.95 18.99 8.2 18.56 8.2 17.86V5.6Z" fill="white"/>
+                        </svg>
+                        <div id="${redDotId}" style="position:absolute;top:-2px;right:-2px;width:9px;height:9px;background:#ff3b30;border:2px solid #ffffff;border-radius:50%;pointer-events:none;"></div>
                     `;
                     btn.style.cssText = `
-                        position: fixed;
-                        right: 18px;
-                        bottom: 120px;
-                        width: 40px;
-                        height: 40px;
-                        border-radius: 50%;
-                        background: rgba(15, 23, 42, 0.75);
-                        backdrop-filter: blur(12px);
-                        -webkit-backdrop-filter: blur(12px);
-                        border: 1px solid rgba(255, 255, 255, 0.18);
-                        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
-                        z-index: 999999;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        cursor: pointer;
-                        user-select: none;
-                        -webkit-user-select: none;
-                        -webkit-tap-highlight-color: transparent;
-                        transition: transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1);
+                        position:fixed;
+                        right:18px;
+                        bottom:118px;
+                        width:42px;
+                        height:42px;
+                        border-radius:21px;
+                        background:#4a9de8;
+                        border:1px solid rgba(255,255,255,0.32);
+                        box-shadow:0 5px 14px rgba(0,0,0,0.24);
+                        z-index:2147483647;
+                        display:flex;
+                        align-items:center;
+                        justify-content:center;
+                        cursor:pointer;
+                        touch-action:none;
+                        user-select:none;
+                        -webkit-user-select:none;
+                        -webkit-touch-callout:none;
+                        -webkit-tap-highlight-color:transparent;
+                        transition:transform 0.12s ease,opacity 0.12s ease;
                     `;
 
                     var isDragging = false;
                     var startX, startY, initialX, initialY;
 
                     btn.addEventListener('touchstart', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+
                         btn.style.transform = 'scale(0.9)';
+
                         var touch = e.touches[0];
                         startX = touch.clientX;
                         startY = touch.clientY;
+
                         var rect = btn.getBoundingClientRect();
                         initialX = rect.left;
                         initialY = rect.top;
                         isDragging = false;
-                    }, {passive: true});
+                    }, { passive: false });
 
                     btn.addEventListener('touchmove', function(e) {
                         e.preventDefault();
-                        e.stopPropagation();
+                        e.stopImmediatePropagation();
+
                         var touch = e.touches[0];
                         var dx = touch.clientX - startX;
                         var dy = touch.clientY - startY;
-                        if (Math.abs(dx) > 6 || Math.abs(dy) > 6) {
+
+                        if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
                             isDragging = true;
                         }
+
                         if (isDragging) {
-                            btn.style.left = (initialX + dx) + 'px';
-                            btn.style.top = (initialY + dy) + 'px';
+                            var maxX = Math.max(0, window.innerWidth - btn.offsetWidth);
+                            var maxY = Math.max(0, window.innerHeight - btn.offsetHeight);
+
+                            var nextX = Math.min(Math.max(0, initialX + dx), maxX);
+                            var nextY = Math.min(Math.max(0, initialY + dy), maxY);
+
+                            btn.style.left = nextX + 'px';
+                            btn.style.top = nextY + 'px';
                             btn.style.right = 'auto';
                             btn.style.bottom = 'auto';
                         }
-                    }, {passive: false});
+                    }, { passive: false });
 
                     btn.addEventListener('touchend', function(e) {
-                        btn.style.transform = 'scale(1.0)';
+                        e.preventDefault();
+                        e.stopPropagation();
+
+                        btn.style.transform = 'scale(1)';
+
                         if (!isDragging) {
                             var currentSrc = btn.dataset.videoUrl || lastSniffedUrl;
                             var dot = document.getElementById(redDotId);
-                            if (dot) dot.style.display = 'none';
+
+                            if (dot) {
+                                dot.style.display = 'none';
+                            }
 
                             if (currentSrc) {
                                 try {
@@ -347,7 +370,12 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
                                 } catch(err) {}
                             }
                         }
-                    });
+                    }, { passive: false });
+
+                    btn.addEventListener('touchcancel', function(e) {
+                        e.preventDefault();
+                        btn.style.transform = 'scale(1)';
+                    }, { passive: false });
 
                     (document.body || document.documentElement).appendChild(btn);
                 }
