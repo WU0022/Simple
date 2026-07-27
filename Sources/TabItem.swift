@@ -46,7 +46,7 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         let userContentController = WKUserContentController()
         configuration.userContentController = userContentController
 
-        webView = WKWebView(frame: UIScreen.main.bounds, configuration: configuration)
+        webView = WKWebView(frame: .zero, configuration: configuration)
         super.init()
 
         webView.customUserAgent = UserAgentStore.shared.getSelectedUA()
@@ -59,9 +59,9 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         webView.allowsBackForwardNavigationGestures = true
         webView.scrollView.keyboardDismissMode = .onDrag
         webView.scrollView.contentInsetAdjustmentBehavior = .automatic
-        webView.backgroundColor = .white
-        webView.scrollView.backgroundColor = .white
-        webView.isOpaque = true
+        webView.backgroundColor = .clear
+        webView.scrollView.backgroundColor = .clear
+        webView.isOpaque = false
     }
 
     deinit {
