@@ -37,10 +37,11 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         configuration.allowsInlineMediaPlayback = true
-        configuration.mediaTypesRequiringUserActionForPlayback = .all
+        configuration.mediaTypesRequiringUserActionForPlayback = []
         configuration.allowsPictureInPictureMediaPlayback = true
 
-        let isDesktop = UserAgentStore.shared.getSelectedId() == "default_mac"
+        let selectedItem = UserAgentStore.shared.getSelectedItem()
+        let isDesktop = selectedItem.category == .desktop || selectedItem.id == "default_mac"
         configuration.defaultWebpagePreferences.preferredContentMode = isDesktop ? .desktop : .mobile
 
         let userContentController = WKUserContentController()
@@ -174,7 +175,8 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
     }
 
     private func applyDesktopViewAdaptationIfNeeded() {
-        let isDesktop = UserAgentStore.shared.getSelectedId() == "default_mac"
+        let selectedItem = UserAgentStore.shared.getSelectedItem()
+        let isDesktop = selectedItem.category == .desktop || selectedItem.id == "default_mac"
         guard isDesktop else { return }
 
         let js = """
@@ -210,8 +212,57 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         webView.evaluateJavaScript(js, completionHandler: nil)
     }
 
+    private func injectInlineVideoHelper() {
+        let js = """
+        (function() {
+            try {
+                function fixInlineVideo(v) {
+                    if (!v) return;
+                    v.setAttribute('playsinline', 'true');
+                    v.setAttribute('webkit-playsinline', 'true');
+                    v.playsInline = true;
+                    if (v.webkitSupportsPresentationMode && typeof v.webkitSetPresentationMode === 'function') {
+                        if (v.webkitPresentationMode === 'fullscreen') {
+                            v.webkitSetPresentationMode('inline');
+                        }
+                    }
+                }
+
+                var videos = document.querySelectorAll('video');
+                for (var i = 0; i < videos.length; i++) {
+                    fixInlineVideo(videos[i]);
+                }
+
+                var observer = new MutationObserver(function(mutations) {
+                    for (var i = 0; i < mutations.length; i++) {
+                        var added = mutations[i].addedNodes;
+                        for (var j = 0; j < added.length; j++) {
+                            var node = added[j];
+                            if (node.tagName === 'VIDEO') {
+                                fixInlineVideo(node);
+                            } else if (node.querySelectorAll) {
+                                var innerVideos = node.querySelectorAll('video');
+                                for (var k = 0; k < innerVideos.length; k++) {
+                                    fixInlineVideo(innerVideos[k]);
+                                }
+                            }
+                        }
+                    }
+                });
+
+                observer.observe(document.documentElement || document.body, {
+                    childList: true,
+                    subtree: true
+                });
+            } catch(e) {}
+        })();
+        """
+        webView.evaluateJavaScript(js, completionHandler: nil)
+    }
+
     func injectAndRunUserScripts() {
         applyDesktopViewAdaptationIfNeeded()
+        injectInlineVideoHelper()
 
         let currentUrlStr = url?.absoluteString ?? ""
         let matchingScripts = UserScriptStore.shared.loadScripts().filter {
@@ -419,6 +470,7 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
             title = webView.title ?? url?.host ?? "新标签页"
         }
         applyDesktopViewAdaptationIfNeeded()
+        injectInlineVideoHelper()
         if !hasInjectedScriptsForCurrentPage {
             hasInjectedScriptsForCurrentPage = true
             injectAndRunUserScripts()
@@ -433,6 +485,7 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
             title = webView.title ?? url?.host ?? "新标签页"
         }
         applyDesktopViewAdaptationIfNeeded()
+        injectInlineVideoHelper()
         if !hasInjectedScriptsForCurrentPage {
             hasInjectedScriptsForCurrentPage = true
             injectAndRunUserScripts()
@@ -495,7 +548,8 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
 
         navigationActionURL = targetURL
 
-        let isDesktopMode = UserAgentStore.shared.getSelectedId() == "default_mac"
+        let selectedItem = UserAgentStore.shared.getSelectedItem()
+        let isDesktopMode = selectedItem.category == .desktop || selectedItem.id == "default_mac"
         preferences.preferredContentMode = isDesktopMode ? .desktop : .mobile
 
         let scheme = targetURL.scheme?.lowercased() ?? ""
