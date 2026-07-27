@@ -453,7 +453,7 @@ final class AdBlockManager {
         parseQueue.async { [weak self] in
             guard let self = self else { return }
 
-            let payload = self.buildSourcePayload(text: text)
+            let payload = self.buildSourcePayloadParallel(text: text)
 
             self.setUpdateStatus(
                 sourceId: sourceId,
@@ -929,40 +929,44 @@ final class AdBlockManager {
         )
     }
 
-    private func buildSourcePayload(text: String) -> AdBlockSourcePayload {
-        var networkChunks: [[AdBlockNetworkRule]] = []
-        var currentRules: [AdBlockNetworkRule] = []
-        var cosmeticRules: [AdBlockCosmeticRule] = []
-        var ruleCount = 0
-        var skippedRuleCount = 0
+    private func buildSourcePayloadParallel(text: String) -> AdBlockSourcePayload {
+        let lines = text.components(separatedBy: .newlines)
+        let totalLines = lines.count
+        guard totalLines > 0 else {
+            return AdBlockSourcePayload(networkChunks: [], cosmeticRules: [], ruleCount: 0, skippedRuleCount: 0)
+        }
 
-        text.enumerateLines { line, _ in
-            autoreleasepool {
+        let sliceSize = 10000
+        let sliceCount = (totalLines + sliceSize - 1) / sliceSize
+
+        var results = Array<AdBlockSourcePayload>(repeating: AdBlockSourcePayload(networkChunks: [], cosmeticRules: [], ruleCount: 0, skippedRuleCount: 0), count: sliceCount)
+
+        DispatchQueue.concurrentPerform(iterations: sliceCount) { index in
+            let start = index * sliceSize
+            let end = min(start + sliceSize, totalLines)
+            let subLines = lines[start..<end]
+
+            var networkRules: [AdBlockNetworkRule] = []
+            var cosmeticRules: [AdBlockCosmeticRule] = []
+            var ruleCount = 0
+            var skippedRuleCount = 0
+
+            for line in subLines {
                 let result = self.parseRule(line)
-
                 if let networkRule = result.networkRule {
-                    currentRules.append(
+                    networkRules.append(
                         AdBlockNetworkRule(
                             rawRule: line,
                             compiledRule: networkRule
                         )
                     )
                     ruleCount += 1
-
-                    if currentRules.count >= self.nativeRuleChunkSize {
-                        networkChunks.append(currentRules)
-                        currentRules.removeAll(keepingCapacity: false)
-                    }
                 }
 
                 if !result.cosmeticRules.isEmpty {
                     for cosmeticRule in result.cosmeticRules {
-                        if cosmeticRules.count < self.maximumCosmeticRulesPerSource {
-                            cosmeticRules.append(cosmeticRule)
-                            ruleCount += 1
-                        } else {
-                            skippedRuleCount += 1
-                        }
+                        cosmeticRules.append(cosmeticRule)
+                        ruleCount += 1
                     }
                 }
 
@@ -970,17 +974,50 @@ final class AdBlockManager {
                     skippedRuleCount += 1
                 }
             }
+
+            var chunks: [[AdBlockNetworkRule]] = []
+            if !networkRules.isEmpty {
+                chunks = stride(from: 0, to: networkRules.count, by: nativeRuleChunkSize).map {
+                    Array(networkRules[$0..<min($0 + nativeRuleChunkSize, networkRules.count)])
+                }
+            }
+
+            results[index] = AdBlockSourcePayload(
+                networkChunks: chunks,
+                cosmeticRules: cosmeticRules,
+                ruleCount: ruleCount,
+                skippedRuleCount: skippedRuleCount
+            )
         }
 
-        if !currentRules.isEmpty {
-            networkChunks.append(currentRules)
+        var allNetworkChunks: [[AdBlockNetworkRule]] = []
+        var allCosmeticRules: [AdBlockCosmeticRule] = []
+        var totalRuleCount = 0
+        var totalSkipped = 0
+
+        for r in results {
+            allNetworkChunks.append(contentsOf: r.networkChunks)
+            if allCosmeticRules.count < maximumCosmeticRulesPerSource {
+                let remainingSpace = maximumCosmeticRulesPerSource - allCosmeticRules.count
+                if r.cosmeticRules.count <= remainingSpace {
+                    allCosmeticRules.append(contentsOf: r.cosmeticRules)
+                } else {
+                    allCosmeticRules.append(contentsOf: r.cosmeticRules.prefix(remainingSpace))
+                    totalSkipped += (r.cosmeticRules.count - remainingSpace)
+                }
+            } else {
+                totalSkipped += r.cosmeticRules.count
+            }
+
+            totalRuleCount += r.ruleCount
+            totalSkipped += r.skippedRuleCount
         }
 
         return AdBlockSourcePayload(
-            networkChunks: networkChunks,
-            cosmeticRules: cosmeticRules,
-            ruleCount: ruleCount,
-            skippedRuleCount: skippedRuleCount
+            networkChunks: allNetworkChunks,
+            cosmeticRules: allCosmeticRules,
+            ruleCount: totalRuleCount,
+            skippedRuleCount: totalSkipped
         )
     }
 
@@ -1122,8 +1159,7 @@ final class AdBlockManager {
 
         guard !filter.isEmpty,
               filter.count < 256,
-              filter.allSatisfy({ $0.isASCII }),
-              (try? NSRegularExpression(pattern: filter)) != nil else {
+              filter.allSatisfy({ $0.isASCII }) else {
             return AdBlockParsedLine(
                 networkRule: nil,
                 cosmeticRules: [],
