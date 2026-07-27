@@ -173,8 +173,9 @@ final class DomainSettingsViewController: UITableViewController {
                 switchView.isEnabled = false
             } else if indexPath.row == 1 {
                 cell.textLabel?.text = "广告过滤"
-                switchView.isOn = DomainSettingsStore.shared.getBool(domain: domain, setting: "adBlock", defaultVal: false)
-                switchView.isEnabled = false
+                switchView.isOn = DomainSettingsStore.shared.getBool(domain: domain, setting: "adBlock", defaultVal: true)
+                switchView.isEnabled = true
+                switchView.addTarget(self, action: #selector(handleSwitchChanged(_:)), for: .valueChanged)
             } else if indexPath.row == 2 {
                 cell.textLabel?.text = "用户脚本"
                 switchView.isOn = DomainSettingsStore.shared.getBool(domain: domain, setting: "userScripts", defaultVal: true)
@@ -191,7 +192,10 @@ final class DomainSettingsViewController: UITableViewController {
     }
 
     @objc private func handleSwitchChanged(_ sender: UISwitch) {
-        if sender.tag == 2 {
+        if sender.tag == 1 {
+            DomainSettingsStore.shared.setBool(domain: domain, setting: "adBlock", value: sender.isOn)
+            onSettingsChanged?()
+        } else if sender.tag == 2 {
             DomainSettingsStore.shared.setBool(domain: domain, setting: "userScripts", value: sender.isOn)
             onSettingsChanged?()
         }
