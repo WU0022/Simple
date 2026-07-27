@@ -15,19 +15,6 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         self.window = window
         return true
     }
-
-    func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
-        if let root = window?.rootViewController {
-            var top = root
-            while let presented = top.presentedViewController {
-                top = presented
-            }
-            if top is CustomVideoPlayerViewController {
-                return .allButUpsideDown
-            }
-        }
-        return .portrait
-    }
 }
 
 class TouchButton: UIButton {
@@ -96,14 +83,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
 
     private var activeTab: TabItem {
         tabs[activeTabIndex]
-    }
-
-    override var shouldAutorotate: Bool {
-        return false
-    }
-
-    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
-        return .portrait
     }
 
     private let webContainer = UIView()
