@@ -274,18 +274,18 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
                     btn.id = btnId;
                     btn.dataset.videoUrl = src;
                     btn.innerHTML = `
-                        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" style="pointer-events:none;">
+                        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" style="pointer-events:none;">
                             <path d="M8.2 5.6C8.2 4.9 8.95 4.47 9.55 4.85L19.1 10.96C19.66 11.32 19.66 12.14 19.1 12.5L9.55 18.61C8.95 18.99 8.2 18.56 8.2 17.86V5.6Z" fill="white"/>
                         </svg>
-                        <div id="${redDotId}" style="position:absolute;top:-2px;right:-2px;width:9px;height:9px;background:#ff3b30;border:2px solid #ffffff;border-radius:50%;pointer-events:none;"></div>
+                        <div id="${redDotId}" style="position:absolute;top:-2px;right:-2px;width:10px;height:10px;background:#ff3b30;border:2px solid #ffffff;border-radius:50%;pointer-events:none;"></div>
                     `;
                     btn.style.cssText = `
                         position:fixed;
                         right:18px;
                         bottom:118px;
-                        width:42px;
-                        height:42px;
-                        border-radius:21px;
+                        width:46px;
+                        height:46px;
+                        border-radius:23px;
                         background:#4a9de8;
                         border:1px solid rgba(255,255,255,0.32);
                         box-shadow:0 5px 14px rgba(0,0,0,0.24);
