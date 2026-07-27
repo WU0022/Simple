@@ -1281,8 +1281,7 @@ final class AdBlockManager {
 
         if !includeDomains.isEmpty {
             trigger["if-domain"] = Array(Set(includeDomains)).sorted()
-        }
-        if !excludeDomains.isEmpty {
+        } else if !excludeDomains.isEmpty {
             trigger["unless-domain"] = Array(Set(excludeDomains)).sorted()
         }
 
