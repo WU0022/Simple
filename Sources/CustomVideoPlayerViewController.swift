@@ -258,7 +258,11 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
         var speedConfig = UIButton.Configuration.plain()
         speedConfig.title = "倍速"
         speedConfig.baseForegroundColor = .white
-        speedConfig.font = .systemFont(ofSize: 13, weight: .semibold)
+        speedConfig.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+            var outgoing = incoming
+            outgoing.font = .systemFont(ofSize: 13, weight: .semibold)
+            return outgoing
+        }
         speedButton.configuration = speedConfig
         speedButton.translatesAutoresizingMaskIntoConstraints = false
         speedButton.addTarget(self, action: #selector(handleSpeedSelect), for: .touchUpInside)
@@ -266,7 +270,11 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
         var preloadConfig = UIButton.Configuration.plain()
         preloadConfig.title = "预加载"
         preloadConfig.baseForegroundColor = .white
-        preloadConfig.font = .systemFont(ofSize: 13, weight: .semibold)
+        preloadConfig.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+            var outgoing = incoming
+            outgoing.font = .systemFont(ofSize: 13, weight: .semibold)
+            return outgoing
+        }
         preloadButton.configuration = preloadConfig
         preloadButton.translatesAutoresizingMaskIntoConstraints = false
         preloadButton.addTarget(self, action: #selector(handlePreloadSelect), for: .touchUpInside)
@@ -530,7 +538,11 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
                 var speedConfig = UIButton.Configuration.plain()
                 speedConfig.title = val == 1.0 ? "倍速" : "\(val)x"
                 speedConfig.baseForegroundColor = .white
-                speedConfig.font = .systemFont(ofSize: 13, weight: .semibold)
+                speedConfig.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+                    var outgoing = incoming
+                    outgoing.font = .systemFont(ofSize: 13, weight: .semibold)
+                    return outgoing
+                }
                 self.speedButton.configuration = speedConfig
             })
         }
@@ -555,7 +567,11 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
                 var preloadConfig = UIButton.Configuration.plain()
                 preloadConfig.title = dur == 0 ? "预加载" : "\(Int(dur))s"
                 preloadConfig.baseForegroundColor = .white
-                preloadConfig.font = .systemFont(ofSize: 13, weight: .semibold)
+                preloadConfig.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+                    var outgoing = incoming
+                    outgoing.font = .systemFont(ofSize: 13, weight: .semibold)
+                    return outgoing
+                }
                 self.preloadButton.configuration = preloadConfig
             })
         }
