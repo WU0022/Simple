@@ -130,12 +130,12 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
             if action == "openCustomPlayer", let urlStr = body["url"] as? String, let videoURL = URL(string: urlStr) {
                 DispatchQueue.main.async {
                     let playerVC = CustomVideoPlayerViewController(videoURL: videoURL, title: self.title)
-                    if let topVC = UIApplication.shared.windows.first(where: { $0.isKeyWindow })?.rootViewController {
-                        var presenter = topVC
-                        while let presented = presenter.presentedViewController {
-                            presenter = presented
+                    let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+                    if let window = scenes.flatMap({ $0.windows }).first(where: { $0.isKeyWindow }), var topVC = window.rootViewController {
+                        while let presented = topVC.presentedViewController {
+                            topVC = presented
                         }
-                        presenter.present(playerVC, animated: true)
+                        topVC.present(playerVC, animated: true)
                     }
                 }
             }
