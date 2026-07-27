@@ -920,12 +920,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     func tabProcessTerminated(_ tab: TabItem) {
         guard !tabs.isEmpty, tab.id == activeTab.id else { return }
         resetProgress()
-        let alert = UIAlertController(title: "页面被释放", message: "系统内存压力过大导致该页面已被释放，是否重新加载？", preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "恢复页面", style: .default) { [weak self] _ in
-            self?.activeTab.webView.reload()
-        })
-        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
-        present(alert, animated: true)
+        activeTab.webView.reload()
     }
 
     func tabDidUpdate(_ tab: TabItem) {
