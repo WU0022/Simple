@@ -17,7 +17,7 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
     private var isLocked = false
 
     private var currentSpeed: Float = 1.0
-    private var currentPreloadDuration: TimeInterval = 30.0
+    private var currentPreloadDuration: TimeInterval = 60.0
     private var currentVideoGravity: AVLayerVideoGravity = .resizeAspect
 
     private enum PanGestureDirection {
@@ -41,20 +41,25 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
     private let topBar = UIView()
     private let bottomBar = UIView()
 
+    private let systemTimeLabel = UILabel()
     private let closeButton = TouchButton()
     private let titleLabel = UILabel()
+    private let netSpeedLabel = UILabel()
+    private let batteryIconView = UIImageView()
     private let lockButton = TouchButton()
     private let pipButton = TouchButton()
     private let aspectButton = TouchButton()
 
     private let currentTimeLabel = UILabel()
+    private let bufferProgressView = UIProgressView(progressViewStyle: .default)
     private let progressSlider = UISlider()
     private let totalTimeLabel = UILabel()
 
     private let playPauseButton = TouchButton()
     private let skipForwardButton = TouchButton()
-    private let speedButton = TouchButton()
+    private let qualityButton = TouchButton()
     private let preloadButton = TouchButton()
+    private let speedButton = TouchButton()
 
     private let hudView = UIView()
     private let hudImageView = UIImageView()
@@ -93,6 +98,7 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
         setupLayout()
         setupGestures()
         setupPlayer()
+        updateSystemTime()
     }
 
     override func viewDidLayoutSubviews() {
@@ -129,7 +135,7 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
 
         view.addSubview(playerView)
 
-        topGradientLayer.colors = [UIColor.black.withAlphaComponent(0.7).cgColor, UIColor.clear.cgColor]
+        topGradientLayer.colors = [UIColor.black.withAlphaComponent(0.75).cgColor, UIColor.clear.cgColor]
         bottomGradientLayer.colors = [UIColor.clear.cgColor, UIColor.black.withAlphaComponent(0.85).cgColor]
 
         view.layer.addSublayer(topGradientLayer)
@@ -161,8 +167,12 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
             bottomBar.heightAnchor.constraint(equalToConstant: 80)
         ])
 
+        systemTimeLabel.translatesAutoresizingMaskIntoConstraints = false
+        systemTimeLabel.textColor = .white
+        systemTimeLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .bold)
+
         var closeConfig = UIButton.Configuration.plain()
-        closeConfig.image = UIImage(systemName: "xmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .bold))
+        closeConfig.image = UIImage(systemName: "xmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .bold))
         closeConfig.baseForegroundColor = .white
         closeButton.configuration = closeConfig
         closeButton.translatesAutoresizingMaskIntoConstraints = false
@@ -171,6 +181,16 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.textColor = .white
         titleLabel.font = .systemFont(ofSize: 15, weight: .bold)
+
+        netSpeedLabel.translatesAutoresizingMaskIntoConstraints = false
+        netSpeedLabel.textColor = .white
+        netSpeedLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+        netSpeedLabel.text = "0.0 KB/s"
+
+        batteryIconView.translatesAutoresizingMaskIntoConstraints = false
+        batteryIconView.image = UIImage(systemName: "battery.100", withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .regular))
+        batteryIconView.tintColor = .white
+        batteryIconView.contentMode = .scaleAspectFit
 
         var lockConfig = UIButton.Configuration.plain()
         lockConfig.image = UIImage(systemName: "lock.open.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 16, weight: .regular))
@@ -193,17 +213,31 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
         aspectButton.translatesAutoresizingMaskIntoConstraints = false
         aspectButton.addTarget(self, action: #selector(handleAspectToggle), for: .touchUpInside)
 
+        topBar.addSubview(systemTimeLabel)
         topBar.addSubview(closeButton)
         topBar.addSubview(titleLabel)
+        topBar.addSubview(netSpeedLabel)
+        topBar.addSubview(batteryIconView)
         topBar.addSubview(lockButton)
         topBar.addSubview(pipButton)
         topBar.addSubview(aspectButton)
 
         NSLayoutConstraint.activate([
+            systemTimeLabel.leadingAnchor.constraint(equalTo: topBar.leadingAnchor),
+            systemTimeLabel.topAnchor.constraint(equalTo: topBar.topAnchor, constant: -16),
+
+            netSpeedLabel.trailingAnchor.constraint(equalTo: batteryIconView.leadingAnchor, constant: -8),
+            netSpeedLabel.centerYAnchor.constraint(equalTo: systemTimeLabel.centerYAnchor),
+
+            batteryIconView.trailingAnchor.constraint(equalTo: topBar.trailingAnchor),
+            batteryIconView.centerYAnchor.constraint(equalTo: systemTimeLabel.centerYAnchor),
+            batteryIconView.widthAnchor.constraint(equalToConstant: 22),
+            batteryIconView.heightAnchor.constraint(equalToConstant: 12),
+
             closeButton.leadingAnchor.constraint(equalTo: topBar.leadingAnchor),
             closeButton.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
-            closeButton.widthAnchor.constraint(equalToConstant: 36),
-            closeButton.heightAnchor.constraint(equalToConstant: 36),
+            closeButton.widthAnchor.constraint(equalToConstant: 32),
+            closeButton.heightAnchor.constraint(equalToConstant: 32),
 
             titleLabel.leadingAnchor.constraint(equalTo: closeButton.trailingAnchor, constant: 8),
             titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: lockButton.leadingAnchor, constant: -12),
@@ -211,80 +245,101 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
 
             aspectButton.trailingAnchor.constraint(equalTo: topBar.trailingAnchor),
             aspectButton.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
-            aspectButton.widthAnchor.constraint(equalToConstant: 36),
-            aspectButton.heightAnchor.constraint(equalToConstant: 36),
+            aspectButton.widthAnchor.constraint(equalToConstant: 32),
+            aspectButton.heightAnchor.constraint(equalToConstant: 32),
 
-            pipButton.trailingAnchor.constraint(equalTo: aspectButton.leadingAnchor, constant: -8),
+            pipButton.trailingAnchor.constraint(equalTo: aspectButton.leadingAnchor, constant: -6),
             pipButton.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
-            pipButton.widthAnchor.constraint(equalToConstant: 36),
-            pipButton.heightAnchor.constraint(equalToConstant: 36),
+            pipButton.widthAnchor.constraint(equalToConstant: 32),
+            pipButton.heightAnchor.constraint(equalToConstant: 32),
 
-            lockButton.trailingAnchor.constraint(equalTo: pipButton.leadingAnchor, constant: -8),
+            lockButton.trailingAnchor.constraint(equalTo: pipButton.leadingAnchor, constant: -6),
             lockButton.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
-            lockButton.widthAnchor.constraint(equalToConstant: 36),
-            lockButton.heightAnchor.constraint(equalToConstant: 36)
+            lockButton.widthAnchor.constraint(equalToConstant: 32),
+            lockButton.heightAnchor.constraint(equalToConstant: 32)
         ])
 
         currentTimeLabel.translatesAutoresizingMaskIntoConstraints = false
         currentTimeLabel.textColor = .white
-        currentTimeLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+        currentTimeLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .bold)
         currentTimeLabel.text = "00:00"
 
+        bufferProgressView.translatesAutoresizingMaskIntoConstraints = false
+        bufferProgressView.progressTintColor = UIColor.white.withAlphaComponent(0.4)
+        bufferProgressView.trackTintColor = UIColor.white.withAlphaComponent(0.2)
+        bufferProgressView.layer.cornerRadius = 2
+        bufferProgressView.clipsToBounds = true
+
         progressSlider.translatesAutoresizingMaskIntoConstraints = false
-        progressSlider.minimumTrackTintColor = .systemBlue
-        progressSlider.maximumTrackTintColor = UIColor.white.withAlphaComponent(0.3)
-        progressSlider.thumbTintColor = .white
+        progressSlider.minimumTrackTintColor = .white
+        progressSlider.maximumTrackTintColor = .clear
+        
+        let transparentImage = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1)).image { _ in }
+        progressSlider.setThumbImage(transparentImage, for: .normal)
         progressSlider.addTarget(self, action: #selector(handleSliderValueChanged(_:event:)), for: .valueChanged)
 
         totalTimeLabel.translatesAutoresizingMaskIntoConstraints = false
         totalTimeLabel.textColor = .white
-        totalTimeLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+        totalTimeLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .bold)
         totalTimeLabel.text = "00:00"
 
         var playConfig = UIButton.Configuration.plain()
-        playConfig.image = UIImage(systemName: "pause.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .bold))
+        playConfig.image = UIImage(systemName: "play.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .bold))
         playConfig.baseForegroundColor = .white
         playPauseButton.configuration = playConfig
         playPauseButton.translatesAutoresizingMaskIntoConstraints = false
         playPauseButton.addTarget(self, action: #selector(handlePlayPause), for: .touchUpInside)
 
         var skipConfig = UIButton.Configuration.plain()
-        skipConfig.image = UIImage(systemName: "goforward.10", withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .medium))
+        skipConfig.image = UIImage(systemName: "forward.end.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 16, weight: .bold))
         skipConfig.baseForegroundColor = .white
         skipForwardButton.configuration = skipConfig
         skipForwardButton.translatesAutoresizingMaskIntoConstraints = false
         skipForwardButton.addTarget(self, action: #selector(handleSkipForward), for: .touchUpInside)
 
-        var speedConfig = UIButton.Configuration.plain()
-        speedConfig.title = "倍速"
-        speedConfig.baseForegroundColor = .white
-        speedConfig.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+        var qualityConfig = UIButton.Configuration.plain()
+        qualityConfig.title = "4K"
+        qualityConfig.baseForegroundColor = .white
+        qualityConfig.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
             var outgoing = incoming
-            outgoing.font = .systemFont(ofSize: 13, weight: .semibold)
+            outgoing.font = .systemFont(ofSize: 13, weight: .bold)
             return outgoing
         }
-        speedButton.configuration = speedConfig
-        speedButton.translatesAutoresizingMaskIntoConstraints = false
-        speedButton.addTarget(self, action: #selector(handleSpeedSelect), for: .touchUpInside)
+        qualityButton.configuration = qualityConfig
+        qualityButton.translatesAutoresizingMaskIntoConstraints = false
 
         var preloadConfig = UIButton.Configuration.plain()
         preloadConfig.title = "预加载"
         preloadConfig.baseForegroundColor = .white
         preloadConfig.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
             var outgoing = incoming
-            outgoing.font = .systemFont(ofSize: 13, weight: .semibold)
+            outgoing.font = .systemFont(ofSize: 13, weight: .bold)
             return outgoing
         }
         preloadButton.configuration = preloadConfig
         preloadButton.translatesAutoresizingMaskIntoConstraints = false
         preloadButton.addTarget(self, action: #selector(handlePreloadSelect), for: .touchUpInside)
 
+        var speedConfig = UIButton.Configuration.plain()
+        speedConfig.title = "倍速"
+        speedConfig.baseForegroundColor = .white
+        speedConfig.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+            var outgoing = incoming
+            outgoing.font = .systemFont(ofSize: 13, weight: .bold)
+            return outgoing
+        }
+        speedButton.configuration = speedConfig
+        speedButton.translatesAutoresizingMaskIntoConstraints = false
+        speedButton.addTarget(self, action: #selector(handleSpeedSelect), for: .touchUpInside)
+
         bottomBar.addSubview(currentTimeLabel)
+        bottomBar.addSubview(bufferProgressView)
         bottomBar.addSubview(progressSlider)
         bottomBar.addSubview(totalTimeLabel)
 
         bottomBar.addSubview(playPauseButton)
         bottomBar.addSubview(skipForwardButton)
+        bottomBar.addSubview(qualityButton)
         bottomBar.addSubview(preloadButton)
         bottomBar.addSubview(speedButton)
 
@@ -292,28 +347,37 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
             currentTimeLabel.leadingAnchor.constraint(equalTo: bottomBar.leadingAnchor),
             currentTimeLabel.topAnchor.constraint(equalTo: bottomBar.topAnchor, constant: 4),
 
-            progressSlider.leadingAnchor.constraint(equalTo: currentTimeLabel.trailingAnchor, constant: 10),
-            progressSlider.trailingAnchor.constraint(equalTo: totalTimeLabel.leadingAnchor, constant: -10),
-            progressSlider.centerYAnchor.constraint(equalTo: currentTimeLabel.centerYAnchor),
+            bufferProgressView.leadingAnchor.constraint(equalTo: currentTimeLabel.trailingAnchor, constant: 12),
+            bufferProgressView.trailingAnchor.constraint(equalTo: totalTimeLabel.leadingAnchor, constant: -12),
+            bufferProgressView.centerYAnchor.constraint(equalTo: currentTimeLabel.centerYAnchor),
+            bufferProgressView.heightAnchor.constraint(equalToConstant: 4),
+
+            progressSlider.leadingAnchor.constraint(equalTo: bufferProgressView.leadingAnchor),
+            progressSlider.trailingAnchor.constraint(equalTo: bufferProgressView.trailingAnchor),
+            progressSlider.centerYAnchor.constraint(equalTo: bufferProgressView.centerYAnchor),
+            progressSlider.heightAnchor.constraint(equalToConstant: 24),
 
             totalTimeLabel.trailingAnchor.constraint(equalTo: bottomBar.trailingAnchor),
             totalTimeLabel.topAnchor.constraint(equalTo: bottomBar.topAnchor, constant: 4),
 
             playPauseButton.leadingAnchor.constraint(equalTo: bottomBar.leadingAnchor),
-            playPauseButton.bottomAnchor.constraint(equalTo: bottomBar.bottomAnchor, constant: -4),
-            playPauseButton.widthAnchor.constraint(equalToConstant: 36),
-            playPauseButton.heightAnchor.constraint(equalToConstant: 36),
+            playPauseButton.bottomAnchor.constraint(equalTo: bottomBar.bottomAnchor, constant: -2),
+            playPauseButton.widthAnchor.constraint(equalToConstant: 32),
+            playPauseButton.heightAnchor.constraint(equalToConstant: 32),
 
-            skipForwardButton.leadingAnchor.constraint(equalTo: playPauseButton.trailingAnchor, constant: 12),
+            skipForwardButton.leadingAnchor.constraint(equalTo: playPauseButton.trailingAnchor, constant: 16),
             skipForwardButton.centerYAnchor.constraint(equalTo: playPauseButton.centerYAnchor),
-            skipForwardButton.widthAnchor.constraint(equalToConstant: 36),
-            skipForwardButton.heightAnchor.constraint(equalToConstant: 36),
+            skipForwardButton.widthAnchor.constraint(equalToConstant: 32),
+            skipForwardButton.heightAnchor.constraint(equalToConstant: 32),
 
             speedButton.trailingAnchor.constraint(equalTo: bottomBar.trailingAnchor),
             speedButton.centerYAnchor.constraint(equalTo: playPauseButton.centerYAnchor),
 
             preloadButton.trailingAnchor.constraint(equalTo: speedButton.leadingAnchor, constant: -12),
-            preloadButton.centerYAnchor.constraint(equalTo: playPauseButton.centerYAnchor)
+            preloadButton.centerYAnchor.constraint(equalTo: playPauseButton.centerYAnchor),
+
+            qualityButton.trailingAnchor.constraint(equalTo: preloadButton.leadingAnchor, constant: -12),
+            qualityButton.centerYAnchor.constraint(equalTo: playPauseButton.centerYAnchor)
         ])
 
         hudView.translatesAutoresizingMaskIntoConstraints = false
@@ -416,8 +480,11 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
     private func addTimeObserver() {
         let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
         timeObserverToken = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-            guard let self = self, !self.isSeeking else { return }
-            self.updateProgress(currentTime: time)
+            guard let self = self else { return }
+            if !self.isSeeking {
+                self.updateProgress(currentTime: time)
+            }
+            self.updateBufferAndNetworkSpeed()
         }
     }
 
@@ -426,6 +493,12 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
             player?.removeTimeObserver(token)
             timeObserverToken = nil
         }
+    }
+
+    private func updateSystemTime() {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        systemTimeLabel.text = formatter.string(from: Date())
     }
 
     private func updateProgress(currentTime: CMTime) {
@@ -440,6 +513,38 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
         progressSlider.value = Float(currentSeconds / totalSeconds)
         currentTimeLabel.text = formatTime(seconds: currentSeconds)
         totalTimeLabel.text = formatTime(seconds: totalSeconds)
+    }
+
+    private func updateBufferAndNetworkSpeed() {
+        updateSystemTime()
+        guard let item = playerItem else { return }
+
+        if let timeRange = item.loadedTimeRanges.first?.timeRangeValue {
+            let bufferStart = CMTimeGetSeconds(timeRange.start)
+            let bufferDuration = CMTimeGetSeconds(timeRange.duration)
+            let totalBuffer = bufferStart + bufferDuration
+            if let duration = item.duration.isNumeric ? item.duration : nil {
+                let totalSeconds = CMTimeGetSeconds(duration)
+                if totalSeconds > 0 {
+                    bufferProgressView.progress = Float(totalBuffer / totalSeconds)
+                }
+            }
+        }
+
+        if let log = item.accessLog()?.events.last {
+            let bytes = log.numberOfBytesTransferred
+            let duration = log.transferDuration
+            if duration > 0 {
+                let bytesPerSec = Double(bytes) / duration
+                if bytesPerSec > 1024 * 1024 {
+                    netSpeedLabel.text = String(format: "%.1f MB/s", bytesPerSec / (1024 * 1024))
+                } else if bytesPerSec > 1024 {
+                    netSpeedLabel.text = String(format: "%.0f KB/s", bytesPerSec / 1024)
+                } else {
+                    netSpeedLabel.text = "0.0 KB/s"
+                }
+            }
+        }
     }
 
     private func formatTime(seconds: Double) -> String {
@@ -463,11 +568,11 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
         guard let player = player else { return }
         if player.timeControlStatus == .playing {
             player.pause()
-            playPauseButton.setImage(UIImage(systemName: "play.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .bold)), for: .normal)
+            playPauseButton.setImage(UIImage(systemName: "play.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .bold)), for: .normal)
         } else {
             player.play()
             player.rate = currentSpeed
-            playPauseButton.setImage(UIImage(systemName: "pause.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .bold)), for: .normal)
+            playPauseButton.setImage(UIImage(systemName: "pause.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .bold)), for: .normal)
         }
         resetControlsTimer()
     }
@@ -540,7 +645,7 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
                 speedConfig.baseForegroundColor = .white
                 speedConfig.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
                     var outgoing = incoming
-                    outgoing.font = .systemFont(ofSize: 13, weight: .semibold)
+                    outgoing.font = .systemFont(ofSize: 13, weight: .bold)
                     return outgoing
                 }
                 self.speedButton.configuration = speedConfig
@@ -553,30 +658,56 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
     @objc private func handlePreloadSelect() {
         let alert = UIAlertController(title: "预加载缓冲区", message: "调大预加载范围可在弱网下获得更顺畅的播放体验", preferredStyle: .actionSheet)
         let options: [(String, TimeInterval)] = [
-            ("自动 (系统策略)", 0),
-            ("预加载 15 秒", 15.0),
+            ("自动 (系统默认)", 0),
             ("预加载 30 秒", 30.0),
             ("预加载 60 秒", 60.0),
-            ("预加载 120 秒 (极大)", 120.0)
+            ("预加载 180 秒 (3分钟)", 180.0),
+            ("预加载 360 秒 (6分钟)", 360.0),
+            ("自定义预加载秒数...", -1.0)
         ]
         for (title, dur) in options {
             alert.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
                 guard let self = self else { return }
-                self.currentPreloadDuration = dur
-                self.playerItem?.preferredForwardBufferDuration = dur
-                var preloadConfig = UIButton.Configuration.plain()
-                preloadConfig.title = dur == 0 ? "预加载" : "\(Int(dur))s"
-                preloadConfig.baseForegroundColor = .white
-                preloadConfig.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
-                    var outgoing = incoming
-                    outgoing.font = .systemFont(ofSize: 13, weight: .semibold)
-                    return outgoing
+                if dur < 0 {
+                    self.showCustomPreloadInputDialog()
+                } else {
+                    self.applyPreloadDuration(dur)
                 }
-                self.preloadButton.configuration = preloadConfig
             })
         }
         alert.addAction(UIAlertAction(title: "取消", style: .cancel))
         present(alert, animated: true)
+    }
+
+    private func showCustomPreloadInputDialog() {
+        let alert = UIAlertController(title: "自定义预加载", message: "请输入预加载秒数 (如 500)", preferredStyle: .alert)
+        alert.addTextField { tf in
+            tf.placeholder = "预加载秒数"
+            tf.keyboardType = .numberPad
+        }
+        alert.addAction(UIAlertAction(title: "确定", style: .default) { [weak self] _ in
+            guard let text = alert.textFields?[0].text?.trimmingCharacters(in: .whitespaces),
+                  let val = Double(text), val > 0 else { return }
+            self?.applyPreloadDuration(val)
+        })
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        present(alert, animated: true)
+    }
+
+    private func applyPreloadDuration(_ duration: TimeInterval) {
+        currentPreloadDuration = duration
+        playerItem?.preferredForwardBufferDuration = duration
+        var preloadConfig = UIButton.Configuration.plain()
+        preloadConfig.title = duration == 0 ? "预加载" : "\(Int(duration))s"
+        preloadConfig.baseForegroundColor = .white
+        preloadConfig.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+            var outgoing = incoming
+            outgoing.font = .systemFont(ofSize: 13, weight: .bold)
+            return outgoing
+        }
+        preloadButton.configuration = preloadConfig
+        showHUD(imageName: "icloud.and.arrow.down", text: duration == 0 ? "预加载: 自动" : "预加载: \(Int(duration))秒")
+        hideHUD()
     }
 
     @objc private func handleSingleTap() {
