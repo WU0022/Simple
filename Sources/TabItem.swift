@@ -54,7 +54,6 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
 
         AdBlockManager.shared.attach(to: webView)
         userContentController.add(self, name: "GM")
-        userContentController.add(self, name: "VideoHelper")
 
         webView.navigationDelegate = self
         webView.uiDelegate = self
@@ -89,7 +88,6 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         })();
         """, completionHandler: nil)
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "GM")
-        webView.configuration.userContentController.removeScriptMessageHandler(forName: "VideoHelper")
         webView.load(URLRequest(url: URL(string: "about:blank")!))
         webView.removeFromSuperview()
         snapshot = nil
@@ -126,22 +124,6 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        if message.name == "VideoHelper", let body = message.body as? [String: Any], let action = body["action"] as? String {
-            if action == "openCustomPlayer", let urlStr = body["url"] as? String, let videoURL = URL(string: urlStr) {
-                DispatchQueue.main.async {
-                    let playerVC = CustomVideoPlayerViewController(videoURL: videoURL, title: self.title)
-                    let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-                    if let window = scenes.flatMap({ $0.windows }).first(where: { $0.isKeyWindow }), var topVC = window.rootViewController {
-                        while let presented = topVC.presentedViewController {
-                            topVC = presented
-                        }
-                        topVC.present(playerVC, animated: true)
-                    }
-                }
-            }
-            return
-        }
-
         guard let body = message.body as? [String: Any], let action = body["action"] as? String else { return }
 
         if action == "goBackAction" {
@@ -233,212 +215,41 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
     }
 
     private func injectInlineVideoHelper() {
-        let currentHost = url?.host ?? ""
-        let isPopoutEnabled = DomainSettingsStore.shared.getBool(domain: currentHost, setting: "videoPopout", defaultVal: true)
-        guard isPopoutEnabled else { return }
-
         let js = """
         (function() {
             try {
-                var btnId = '__sniff_floating_btn__';
-                var redDotId = '__sniff_red_dot__';
-                var lastSniffedUrl = null;
-
-                function isValidMediaUrl(url) {
-                    if (!url || typeof url !== 'string') return false;
-                    if (url.indexOf('blob:') === 0 || url.indexOf('data:') === 0) return false;
-                    var lower = url.toLowerCase();
-                    return lower.indexOf('.m3u8') !== -1 ||
-                           lower.indexOf('.mp4') !== -1 ||
-                           lower.indexOf('.flv') !== -1 ||
-                           lower.indexOf('.m4s') !== -1 ||
-                           lower.indexOf('/video/') !== -1;
-                }
-
-                function createFloatingBtn(src) {
-                    if (!src) return;
-                    var isNew = (src !== lastSniffedUrl);
-                    lastSniffedUrl = src;
-
-                    var existing = document.getElementById(btnId);
-                    if (existing) {
-                        existing.dataset.videoUrl = src;
-                        if (isNew) {
-                            var dot = document.getElementById(redDotId);
-                            if (dot) dot.style.display = 'block';
-                        }
-                        return;
-                    }
-
-                    var btn = document.createElement('div');
-                    btn.id = btnId;
-                    btn.dataset.videoUrl = src;
-                    btn.innerHTML = `
-                        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" style="pointer-events:none;">
-                            <path d="M8.2 5.6C8.2 4.9 8.95 4.47 9.55 4.85L19.1 10.96C19.66 11.32 19.66 12.14 19.1 12.5L9.55 18.61C8.95 18.99 8.2 18.56 8.2 17.86V5.6Z" fill="white"/>
-                        </svg>
-                        <div id="${redDotId}" style="position:absolute;top:-2px;right:-2px;width:10px;height:10px;background:#ff3b30;border:2px solid #ffffff;border-radius:50%;pointer-events:none;"></div>
-                    `;
-                    btn.style.cssText = `
-                        position:fixed;
-                        right:18px;
-                        bottom:118px;
-                        width:46px;
-                        height:46px;
-                        border-radius:23px;
-                        background:#4a9de8;
-                        border:1px solid rgba(255,255,255,0.32);
-                        box-shadow:0 5px 14px rgba(0,0,0,0.24);
-                        z-index:2147483647;
-                        display:flex;
-                        align-items:center;
-                        justify-content:center;
-                        cursor:pointer;
-                        touch-action:none;
-                        user-select:none;
-                        -webkit-user-select:none;
-                        -webkit-touch-callout:none;
-                        -webkit-tap-highlight-color:transparent;
-                        transition:transform 0.12s ease,opacity 0.12s ease;
-                    `;
-
-                    var isDragging = false;
-                    var startX, startY, initialX, initialY;
-
-                    btn.addEventListener('touchstart', function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-
-                        btn.style.transform = 'scale(0.9)';
-
-                        var touch = e.touches[0];
-                        startX = touch.clientX;
-                        startY = touch.clientY;
-
-                        var rect = btn.getBoundingClientRect();
-                        initialX = rect.left;
-                        initialY = rect.top;
-                        isDragging = false;
-                    }, { passive: false });
-
-                    btn.addEventListener('touchmove', function(e) {
-                        e.preventDefault();
-                        e.stopImmediatePropagation();
-
-                        var touch = e.touches[0];
-                        var dx = touch.clientX - startX;
-                        var dy = touch.clientY - startY;
-
-                        if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
-                            isDragging = true;
-                        }
-
-                        if (isDragging) {
-                            var maxX = Math.max(0, window.innerWidth - btn.offsetWidth);
-                            var maxY = Math.max(0, window.innerHeight - btn.offsetHeight);
-
-                            var nextX = Math.min(Math.max(0, initialX + dx), maxX);
-                            var nextY = Math.min(Math.max(0, initialY + dy), maxY);
-
-                            btn.style.left = nextX + 'px';
-                            btn.style.top = nextY + 'px';
-                            btn.style.right = 'auto';
-                            btn.style.bottom = 'auto';
-                        }
-                    }, { passive: false });
-
-                    btn.addEventListener('touchend', function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-
-                        btn.style.transform = 'scale(1)';
-
-                        if (!isDragging) {
-                            var currentSrc = btn.dataset.videoUrl || lastSniffedUrl;
-                            var dot = document.getElementById(redDotId);
-
-                            if (dot) {
-                                dot.style.display = 'none';
-                            }
-
-                            if (currentSrc) {
-                                try {
-                                    window.webkit.messageHandlers.VideoHelper.postMessage({
-                                        action: 'openCustomPlayer',
-                                        url: currentSrc
-                                    });
-                                } catch(err) {}
-                            }
-                        }
-                    }, { passive: false });
-
-                    btn.addEventListener('touchcancel', function(e) {
-                        e.preventDefault();
-                        btn.style.transform = 'scale(1)';
-                    }, { passive: false });
-
-                    (document.body || document.documentElement).appendChild(btn);
-                }
-
-                function sniffDomVideos() {
-                    var videos = document.querySelectorAll('video');
-                    for (var i = 0; i < videos.length; i++) {
-                        var v = videos[i];
-                        var src = v.currentSrc || v.src;
-                        if (isValidMediaUrl(src)) {
-                            createFloatingBtn(src);
-                            return;
-                        }
-                        var sources = v.querySelectorAll('source');
-                        for (var j = 0; j < sources.length; j++) {
-                            if (isValidMediaUrl(sources[j].src)) {
-                                createFloatingBtn(sources[j].src);
-                                return;
-                            }
+                function fixInlineVideo(v) {
+                    if (!v) return;
+                    v.setAttribute('playsinline', 'true');
+                    v.setAttribute('webkit-playsinline', 'true');
+                    v.playsInline = true;
+                    if (v.webkitSupportsPresentationMode && typeof v.webkitSetPresentationMode === 'function') {
+                        if (v.webkitPresentationMode === 'fullscreen') {
+                            v.webkitSetPresentationMode('inline');
                         }
                     }
                 }
 
-                function sniffPerformanceEntries() {
-                    if (!window.performance || typeof window.performance.getEntriesByType !== 'function') return;
-                    var entries = window.performance.getEntriesByType('resource');
-                    for (var i = entries.length - 1; i >= 0; i--) {
-                        var name = entries[i].name;
-                        if (isValidMediaUrl(name)) {
-                            createFloatingBtn(name);
-                            break;
+                var videos = document.querySelectorAll('video');
+                for (var i = 0; i < videos.length; i++) {
+                    fixInlineVideo(videos[i]);
+                }
+
+                var observer = new MutationObserver(function(mutations) {
+                    for (var i = 0; i < mutations.length; i++) {
+                        var added = mutations[i].addedNodes;
+                        for (var j = 0; j < added.length; j++) {
+                            var node = added[j];
+                            if (node.tagName === 'VIDEO') {
+                                fixInlineVideo(node);
+                            } else if (node.querySelectorAll) {
+                                var innerVideos = node.querySelectorAll('video');
+                                for (var k = 0; k < innerVideos.length; k++) {
+                                    fixInlineVideo(innerVideos[k]);
+                                }
+                            }
                         }
                     }
-                }
-
-                sniffDomVideos();
-                sniffPerformanceEntries();
-
-                var origFetch = window.fetch;
-                if (origFetch) {
-                    window.fetch = function() {
-                        var url = arguments[0];
-                        if (typeof url === 'string' && isValidMediaUrl(url)) {
-                            createFloatingBtn(url);
-                        } else if (url && typeof url.url === 'string' && isValidMediaUrl(url.url)) {
-                            createFloatingBtn(url.url);
-                        }
-                        return origFetch.apply(this, arguments);
-                    };
-                }
-
-                var origOpen = XMLHttpRequest.prototype.open;
-                if (origOpen) {
-                    XMLHttpRequest.prototype.open = function(method, url) {
-                        if (typeof url === 'string' && isValidMediaUrl(url)) {
-                            createFloatingBtn(url);
-                        }
-                        return origOpen.apply(this, arguments);
-                    };
-                }
-
-                var observer = new MutationObserver(function() {
-                    sniffDomVideos();
                 });
 
                 observer.observe(document.documentElement || document.body, {
