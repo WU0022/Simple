@@ -60,12 +60,16 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
 
     required init?(coder: NSCoder) { nil }
 
-    override var prefersStatusBarHidden: Bool {
-        return !isControlsVisible
+    override var shouldAutorotate: Bool {
+        return true
     }
 
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
         return .allButUpsideDown
+    }
+
+    override var prefersStatusBarHidden: Bool {
+        return !isControlsVisible
     }
 
     override func viewDidLoad() {
@@ -79,6 +83,14 @@ final class CustomVideoPlayerViewController: UIViewController, AVPictureInPictur
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         playerLayer?.frame = playerView.bounds
+    }
+
+    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+        coordinator.animate(alongsideTransition: { [weak self] _ in
+            guard let self = self else { return }
+            self.playerLayer?.frame = CGRect(origin: .zero, size: size)
+        }, completion: nil)
     }
 
     override func viewWillDisappear(_ animated: Bool) {
