@@ -118,8 +118,8 @@ final class UserAgentStore {
         ),
         UserAgentItem(
             id: "default_mac",
-            name: "macOS Safari",
-            uaString: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15",
+            name: "macOS Chrome",
+            uaString: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
             isCustom: false
         )
     ]
