@@ -86,14 +86,17 @@ final class AddressTextField: UITextField {
     }
 
     func showQuickActionMenu() {
-        becomeFirstResponder()
+        if !isFirstResponder {
+            becomeFirstResponder()
+        }
         if let cursorRange = textRange(from: endOfDocument, to: endOfDocument) {
             selectedTextRange = cursorRange
         }
-        UIMenuController.shared.menuItems = [
-            UIMenuItem(title: "粘贴并前往", action: #selector(pasteAndGo(_:)))
-        ]
-        DispatchQueue.main.async {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            guard self.isFirstResponder else { return }
+            UIMenuController.shared.menuItems = [
+                UIMenuItem(title: "粘贴并前往", action: #selector(self.pasteAndGo(_:)))
+            ]
             UIMenuController.shared.showMenu(from: self, rect: self.bounds)
         }
     }
@@ -135,6 +138,14 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     private let pluginButton = TouchButton()
     private let tabsButton = TouchButton()
     private let moreButton = TouchButton()
+
+    private lazy var addressLongPressGesture: UILongPressGestureRecognizer = {
+        let gesture = UILongPressGestureRecognizer(target: self, action: #selector(handleAddressLongPress(_:)))
+        gesture.minimumPressDuration = 0.45
+        gesture.cancelsTouchesInView = true
+        gesture.delegate = self
+        return gesture
+    }()
 
     private var bottomPanelBottomConstraint: NSLayoutConstraint?
     private var webTopSafeConstraint: NSLayoutConstraint?
@@ -425,6 +436,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         addressContainer.backgroundColor = .white
         addressContainer.layer.cornerRadius = 22
         addressContainer.clipsToBounds = true
+        addressContainer.addGestureRecognizer(addressLongPressGesture)
 
         lockButton.translatesAutoresizingMaskIntoConstraints = false
         lockButton.tintColor = .secondaryLabel
@@ -456,14 +468,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             self.addressField.resignFirstResponder()
             self.load(url: url)
         }
-
-        let addressLongPress = UILongPressGestureRecognizer(
-            target: self,
-            action: #selector(handleAddressLongPress(_:))
-        )
-        addressLongPress.minimumPressDuration = 0.45
-        addressLongPress.cancelsTouchesInView = true
-        addressField.addGestureRecognizer(addressLongPress)
 
         refreshButton.translatesAutoresizingMaskIntoConstraints = false
         refreshButton.tintColor = .secondaryLabel
@@ -1054,6 +1058,13 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        if gestureRecognizer === addressLongPressGesture {
+            guard let touchedView = touch.view else {
+                return false
+            }
+            return touchedView === addressContainer || touchedView.isDescendant(of: addressContainer)
+        }
+
         if touch.view?.isDescendant(of: addressContainer) == true {
             return false
         }
