@@ -60,6 +60,9 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         webView.allowsBackForwardNavigationGestures = true
         webView.scrollView.keyboardDismissMode = .onDrag
         webView.scrollView.contentInsetAdjustmentBehavior = .automatic
+        webView.scrollView.bounces = false
+        webView.scrollView.alwaysBounceVertical = false
+        webView.scrollView.alwaysBounceHorizontal = false
         webView.backgroundColor = .white
         webView.scrollView.backgroundColor = .white
         webView.isOpaque = true
@@ -260,39 +263,9 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         webView.evaluateJavaScript(js, completionHandler: nil)
     }
 
-    private func injectRenderingOptimizations() {
-        let js = """
-        (function() {
-            try {
-                var styleId = '__rendering_optimizations__';
-                if (!document.getElementById(styleId)) {
-                    var style = document.createElement('style');
-                    style.id = styleId;
-                    style.type = 'text/css';
-                    style.innerHTML = `
-                        html {
-                            scroll-behavior: smooth;
-                            -webkit-overflow-scrolling: touch;
-                            -webkit-text-size-adjust: 100%;
-                            -webkit-tap-highlight-color: rgba(0,0,0,0);
-                        }
-                        body {
-                            text-rendering: optimizeLegibility;
-                            -webkit-font-smoothing: antialiased;
-                        }
-                    `;
-                    (document.head || document.documentElement).appendChild(style);
-                }
-            } catch(e) {}
-        })();
-        """
-        webView.evaluateJavaScript(js, completionHandler: nil)
-    }
-
     func injectAndRunUserScripts() {
         applyDesktopViewAdaptationIfNeeded()
         injectInlineVideoHelper()
-        injectRenderingOptimizations()
 
         let currentUrlStr = url?.absoluteString ?? ""
         let matchingScripts = UserScriptStore.shared.loadScripts().filter {
@@ -501,7 +474,6 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         }
         applyDesktopViewAdaptationIfNeeded()
         injectInlineVideoHelper()
-        injectRenderingOptimizations()
         if !hasInjectedScriptsForCurrentPage {
             hasInjectedScriptsForCurrentPage = true
             injectAndRunUserScripts()
@@ -517,7 +489,6 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
         }
         applyDesktopViewAdaptationIfNeeded()
         injectInlineVideoHelper()
-        injectRenderingOptimizations()
         if !hasInjectedScriptsForCurrentPage {
             hasInjectedScriptsForCurrentPage = true
             injectAndRunUserScripts()
