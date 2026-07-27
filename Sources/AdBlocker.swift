@@ -74,6 +74,19 @@ final class AdBlockManager {
         UserDefaults.standard.set(data, forKey: subscriptionsKey)
     }
 
+    func toggleSubscription(id: String, isEnabled: Bool) {
+        var subscriptions = loadSubscriptions()
+        if let idx = subscriptions.firstIndex(where: { $0.id == id }) {
+            subscriptions[idx].isEnabled = isEnabled
+            saveSubscriptions(subscriptions)
+            if isEnabled {
+                compileSource(id: id, completion: nil)
+            } else {
+                deactivateSource(id: id)
+            }
+        }
+    }
+
     func getCustomRules() -> String {
         UserDefaults.standard.string(forKey: customRulesKey) ?? ""
     }
@@ -215,13 +228,21 @@ final class AdBlockManager {
             return
         }
 
+        let enabledSubs = Set(loadSubscriptions().filter { $0.isEnabled }.map { $0.id })
+
         for sourceId in compiledListsBySource.keys.sorted() {
+            if sourceId != Self.customSourceId && !enabledSubs.contains(sourceId) {
+                continue
+            }
             for ruleList in compiledListsBySource[sourceId] ?? [] {
                 controller.add(ruleList)
             }
         }
 
         for sourceId in cosmeticScriptsBySource.keys.sorted() {
+            if sourceId != Self.customSourceId && !enabledSubs.contains(sourceId) {
+                continue
+            }
             for script in cosmeticScriptsBySource[sourceId] ?? [] {
                 controller.addUserScript(script)
             }
@@ -1591,7 +1612,6 @@ final class AdBlockManagerViewController: UIViewController, UITableViewDataSourc
                         } else {
                             cell.detailTextLabel?.text = "尚未更新"
                         }
-                        cell.accessoryType = .disclosureIndicator
                     }
                 }
             } else if indexPath.section == 2 {
@@ -1648,25 +1668,28 @@ final class AdBlockManagerViewController: UIViewController, UITableViewDataSourc
                 let subscription = subscriptions[indexPath.row]
                 cell.textLabel?.text = subscription.name
 
+                let toggle = UISwitch()
+                toggle.isOn = subscription.isEnabled
+                toggle.tag = indexPath.row
+                toggle.addTarget(self, action: #selector(handleSubscriptionToggle(_:)), for: .valueChanged)
+                cell.accessoryView = toggle
+
                 if AdBlockManager.shared.isUpdating(sourceId: subscription.id) {
                     cell.detailTextLabel?.text = AdBlockManager.shared.updateStatus(
                         sourceId: subscription.id
                     ) ?? "更新中…"
-                    cell.accessoryType = .none
                 } else if let date = subscription.lastUpdated {
                     let formatter = DateFormatter()
                     formatter.dateFormat = "MM-dd HH:mm"
                     cell.detailTextLabel?.text = "\(subscription.ruleCount) 条 | \(formatter.string(from: date))"
-                    cell.accessoryType = .disclosureIndicator
                 } else {
                     cell.detailTextLabel?.text = "尚未更新"
-                    cell.accessoryType = .disclosureIndicator
                 }
             } else {
                 cell.textLabel?.text = "添加新订阅链接…"
                 cell.textLabel?.textColor = .systemBlue
                 cell.detailTextLabel?.text = nil
-                cell.accessoryType = .none
+                cell.accessoryView = nil
             }
 
             return cell
@@ -1691,6 +1714,14 @@ final class AdBlockManagerViewController: UIViewController, UITableViewDataSourc
 
     @objc private func handleMasterToggle(_ sender: UISwitch) {
         AdBlockManager.shared.isEnabled = sender.isOn
+        onRulesChanged?()
+    }
+
+    @objc private func handleSubscriptionToggle(_ sender: UISwitch) {
+        let index = sender.tag
+        guard index < subscriptions.count else { return }
+        let subscription = subscriptions[index]
+        AdBlockManager.shared.toggleSubscription(id: subscription.id, isEnabled: sender.isOn)
         onRulesChanged?()
     }
 
