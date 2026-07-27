@@ -274,18 +274,21 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
                     btn.id = btnId;
                     btn.dataset.videoUrl = src;
                     btn.innerHTML = `
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="white" style="margin-left: 2px; pointer-events: none;"><path d="M8 5v14l11-7z"/></svg>
-                        <div id="${redDotId}" style="position: absolute; top: -1px; right: -1px; width: 10px; height: 10px; background-color: #FF3B30; border: 2px solid #ffffff; border-radius: 50%; pointer-events: none;"></div>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="white" style="margin-left: 2px; pointer-events: none;"><path d="M8 5v14l11-7z"/></svg>
+                        <div id="${redDotId}" style="position: absolute; top: 0px; right: 0px; width: 8px; height: 8px; background-color: #FF3B30; border: 1.5px solid #ffffff; border-radius: 50%; pointer-events: none;"></div>
                     `;
                     btn.style.cssText = `
                         position: fixed;
                         right: 18px;
                         bottom: 120px;
-                        width: 45px;
-                        height: 45px;
+                        width: 40px;
+                        height: 40px;
                         border-radius: 50%;
-                        background: linear-gradient(135deg, #3B82F6 0%, #1D4ED8 100%);
-                        box-shadow: 0 8px 24px rgba(29, 78, 216, 0.45);
+                        background: rgba(15, 23, 42, 0.75);
+                        backdrop-filter: blur(12px);
+                        -webkit-backdrop-filter: blur(12px);
+                        border: 1px solid rgba(255, 255, 255, 0.18);
+                        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
                         z-index: 999999;
                         display: flex;
                         align-items: center;
@@ -301,7 +304,7 @@ final class TabItem: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessa
                     var startX, startY, initialX, initialY;
 
                     btn.addEventListener('touchstart', function(e) {
-                        btn.style.transform = 'scale(0.88)';
+                        btn.style.transform = 'scale(0.9)';
                         var touch = e.touches[0];
                         startX = touch.clientX;
                         startY = touch.clientY;
