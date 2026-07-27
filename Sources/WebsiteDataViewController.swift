@@ -191,9 +191,17 @@ final class DomainSettingsViewController: UITableViewController {
 }
 
 final class UserAgentManagerViewController: UITableViewController {
-    private var items: [UserAgentItem] = []
+    private var mobileItems: [UserAgentItem] = []
+    private var desktopItems: [UserAgentItem] = []
+    private var customItems: [UserAgentItem] = []
     private var selectedId: String = ""
     var onUASelected: ((UserAgentItem) -> Void)?
+
+    init() {
+        super.init(style: .grouped)
+    }
+
+    required init?(coder: NSCoder) { nil }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -217,7 +225,9 @@ final class UserAgentManagerViewController: UITableViewController {
     }
 
     private func loadData() {
-        items = UserAgentStore.shared.loadAllItems()
+        mobileItems = UserAgentStore.shared.loadMobileItems()
+        desktopItems = UserAgentStore.shared.loadDesktopItems()
+        customItems = UserAgentStore.shared.loadCustomItems()
         selectedId = UserAgentStore.shared.getSelectedId()
         tableView.reloadData()
     }
@@ -270,16 +280,52 @@ final class UserAgentManagerViewController: UITableViewController {
         present(alert, animated: true)
     }
 
+    private func item(for indexPath: IndexPath) -> UserAgentItem {
+        switch indexPath.section {
+        case 0:
+            return mobileItems[indexPath.row]
+        case 1:
+            return desktopItems[indexPath.row]
+        default:
+            return customItems[indexPath.row]
+        }
+    }
+
+    override func numberOfSections(in tableView: UITableView) -> Int {
+        return customItems.isEmpty ? 2 : 3
+    }
+
+    override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
+        switch section {
+        case 0:
+            return "移动版标识"
+        case 1:
+            return "电脑版标识"
+        default:
+            return "自定义标识"
+        }
+    }
+
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        return items.count
+        switch section {
+        case 0:
+            return mobileItems.count
+        case 1:
+            return desktopItems.count
+        default:
+            return customItems.count
+        }
     }
 
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "UACell", for: indexPath)
-        let item = items[indexPath.row]
+        let item = self.item(for: indexPath)
 
         var content = cell.defaultContentConfiguration()
         content.text = item.name
+        content.secondaryText = item.uaString
+        content.secondaryTextProperties.numberOfLines = 1
+        content.secondaryTextProperties.textColor = .secondaryLabel
         cell.contentConfiguration = content
 
         cell.accessoryType = item.id == selectedId ? .checkmark : .none
@@ -288,7 +334,7 @@ final class UserAgentManagerViewController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        let item = items[indexPath.row]
+        let item = self.item(for: indexPath)
         selectedId = item.id
         UserAgentStore.shared.setSelectedId(item.id)
         tableView.reloadData()
@@ -298,7 +344,7 @@ final class UserAgentManagerViewController: UITableViewController {
     }
 
     override func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-        let item = items[indexPath.row]
+        let item = self.item(for: indexPath)
 
         let editAction = UIContextualAction(style: .normal, title: "编辑") { [weak self] _, _, completion in
             self?.showEditUAAlert(item: item)
