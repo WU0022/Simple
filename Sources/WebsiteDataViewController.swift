@@ -249,7 +249,7 @@ final class UserAgentManagerViewController: UITableViewController {
     private var mobileItems: [UserAgentItem] = []
     private var desktopItems: [UserAgentItem] = []
     private var customItems: [UserAgentItem] = []
-    private var selectedId: String = ""
+
     var onUASelected: ((UserAgentItem) -> Void)?
 
     init() {
@@ -285,7 +285,6 @@ final class UserAgentManagerViewController: UITableViewController {
         mobileItems = UserAgentStore.shared.loadMobileItems()
         desktopItems = UserAgentStore.shared.loadDesktopItems()
         customItems = UserAgentStore.shared.loadCustomItems()
-        selectedId = UserAgentStore.shared.getSelectedId()
         tableView.reloadData()
     }
 
@@ -298,11 +297,18 @@ final class UserAgentManagerViewController: UITableViewController {
         alert.addTextField { tf in tf.placeholder = "标识名称" }
         alert.addTextField { tf in tf.placeholder = "User-Agent 字符串" }
 
-        alert.addAction(UIAlertAction(title: "添加", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: "保存为移动版", style: .default) { [weak self] _ in
             guard let name = alert.textFields?[0].text?.trimmingCharacters(in: .whitespaces), !name.isEmpty,
                   let ua = alert.textFields?[1].text?.trimmingCharacters(in: .whitespaces), !ua.isEmpty else { return }
 
-            UserAgentStore.shared.addCustomItem(name: name, uaString: ua)
+            UserAgentStore.shared.addCustomItem(name: name, uaString: ua, category: .mobile)
+            self?.loadData()
+        })
+        alert.addAction(UIAlertAction(title: "保存为电脑版", style: .default) { [weak self] _ in
+            guard let name = alert.textFields?[0].text?.trimmingCharacters(in: .whitespaces), !name.isEmpty,
+                  let ua = alert.textFields?[1].text?.trimmingCharacters(in: .whitespaces), !ua.isEmpty else { return }
+
+            UserAgentStore.shared.addCustomItem(name: name, uaString: ua, category: .desktop)
             self?.loadData()
         })
         alert.addAction(UIAlertAction(title: "取消", style: .cancel))
@@ -327,7 +333,7 @@ final class UserAgentManagerViewController: UITableViewController {
             if item.isCustom {
                 UserAgentStore.shared.updateCustomItem(id: item.id, name: name, uaString: ua)
             } else {
-                UserAgentStore.shared.addCustomItem(name: name, uaString: ua)
+                UserAgentStore.shared.addCustomItem(name: name, uaString: ua, category: item.category)
             }
             self?.loadData()
             let currentItem = UserAgentStore.shared.getSelectedItem()
@@ -381,15 +387,40 @@ final class UserAgentManagerViewController: UITableViewController {
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "UserAgentCardCell", for: indexPath) as! UserAgentCardCell
         let item = self.item(for: indexPath)
-        cell.configure(item: item, isSelected: item.id == selectedId)
+        let isSelected: Bool
+        if indexPath.section == 0 {
+            isSelected = (item.id == UserAgentStore.shared.getSelectedMobileId())
+        } else if indexPath.section == 1 {
+            isSelected = (item.id == UserAgentStore.shared.getSelectedDesktopId())
+        } else {
+            if item.category == .desktop {
+                isSelected = (item.id == UserAgentStore.shared.getSelectedDesktopId())
+            } else {
+                isSelected = (item.id == UserAgentStore.shared.getSelectedMobileId())
+            }
+        }
+        cell.configure(item: item, isSelected: isSelected)
         return cell
     }
 
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         let item = self.item(for: indexPath)
-        selectedId = item.id
-        UserAgentStore.shared.setSelectedId(item.id)
+        if indexPath.section == 0 {
+            UserAgentStore.shared.setSelectedMobileId(item.id)
+            UserAgentStore.shared.currentMode = .mobile
+        } else if indexPath.section == 1 {
+            UserAgentStore.shared.setSelectedDesktopId(item.id)
+            UserAgentStore.shared.currentMode = .desktop
+        } else {
+            if item.category == .desktop {
+                UserAgentStore.shared.setSelectedDesktopId(item.id)
+                UserAgentStore.shared.currentMode = .desktop
+            } else {
+                UserAgentStore.shared.setSelectedMobileId(item.id)
+                UserAgentStore.shared.currentMode = .mobile
+            }
+        }
         tableView.reloadData()
 
         onUASelected?(item)
