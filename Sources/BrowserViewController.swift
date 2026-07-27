@@ -62,6 +62,26 @@ class TouchButton: UIButton {
     }
 }
 
+final class AddressTextField: UITextField {
+    var onPasteAndGo: ((String) -> Void)?
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(copy(_:)) {
+            return !(text?.isEmpty ?? true)
+        }
+        if action == #selector(pasteAndGo(_:)) {
+            return UIPasteboard.general.hasStrings
+        }
+        return super.canPerformAction(action, withSender: sender)
+    }
+
+    @objc func pasteAndGo(_ sender: Any?) {
+        guard let string = UIPasteboard.general.string, !string.isEmpty else { return }
+        text = string
+        onPasteAndGo?(string)
+    }
+}
+
 final class BrowserViewController: UIViewController, UITextFieldDelegate, TabItemDelegate, UIGestureRecognizerDelegate {
     private var tabs: [TabItem] = []
     private var activeTabIndex = 0
@@ -87,7 +107,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
     private let addressShadowView = UIView()
     private let addressContainer = UIView()
     private let lockButton = TouchButton()
-    private let addressField = UITextField()
+    private let addressField = AddressTextField()
     private let refreshButton = TouchButton()
     private let clearButton = TouchButton()
     private let progressView = UIProgressView(progressViewStyle: .default)
@@ -389,10 +409,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         addressContainer.layer.cornerRadius = 22
         addressContainer.clipsToBounds = true
 
-        let longPressAddress = UILongPressGestureRecognizer(target: self, action: #selector(handleAddressLongPress(_:)))
-        longPressAddress.minimumPressDuration = 0.4
-        addressContainer.addGestureRecognizer(longPressAddress)
-
         lockButton.translatesAutoresizingMaskIntoConstraints = false
         lockButton.tintColor = .secondaryLabel
         lockButton.setImage(
@@ -418,6 +434,11 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         addressField.clearButtonMode = .never
         addressField.textContentType = .URL
         addressField.addTarget(self, action: #selector(addressFieldDidChange), for: .editingChanged)
+        addressField.onPasteAndGo = { [weak self] input in
+            guard let self = self, let url = self.destinationURL(from: input) else { return }
+            self.addressField.resignFirstResponder()
+            self.load(url: url)
+        }
 
         refreshButton.translatesAutoresizingMaskIntoConstraints = false
         refreshButton.tintColor = .secondaryLabel
@@ -567,42 +588,6 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         guard gesture.state == .began else { return }
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         showCleanDataMenu()
-    }
-
-    @objc private func handleAddressLongPress(_ gesture: UILongPressGestureRecognizer) {
-        guard gesture.state == .began else { return }
-        let urlText = activeTab.url?.absoluteString.removingPercentEncoding ?? activeTab.url?.absoluteString ?? addressField.text ?? ""
-        guard !urlText.isEmpty else { return }
-
-        UIPasteboard.general.string = urlText
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        showToastNotice("已复制当前网址")
-    }
-
-    private func showToastNotice(_ text: String) {
-        let toast = UILabel()
-        toast.text = "  \(text)  "
-        toast.font = .systemFont(ofSize: 13, weight: .medium)
-        toast.textColor = .white
-        toast.backgroundColor = UIColor.black.withAlphaComponent(0.75)
-        toast.layer.cornerRadius = 12
-        toast.clipsToBounds = true
-        toast.translatesAutoresizingMaskIntoConstraints = false
-        toast.alpha = 0
-
-        view.addSubview(toast)
-        NSLayoutConstraint.activate([
-            toast.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            toast.bottomAnchor.constraint(equalTo: bottomPanel.topAnchor, constant: -12),
-            toast.heightAnchor.constraint(equalToConstant: 32)
-        ])
-
-        UIView.animate(withDuration: 0.18) { toast.alpha = 1 }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            UIView.animate(withDuration: 0.2, animations: { toast.alpha = 0 }) { _ in
-                toast.removeFromSuperview()
-            }
-        }
     }
 
     private func configureToolbarButton(_ button: TouchButton, imageName: String, action: Selector?) {
@@ -1454,9 +1439,9 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
             }
         ))
 
-        let isDesktop = currentUAItem.id == "default_mac"
+        let isDesktop = currentUAItem.category == .desktop || currentUAItem.id == "default_mac"
         items.append(CustomBottomSheetItem(
-            title: isDesktop ? "移动版" : "电脑版",
+            title: isDesktop ? "切换为移动版" : "切换为电脑版",
             handler: { [weak self] in
                 guard let self = self else { return }
                 let targetId = isDesktop ? "default_safari" : "default_mac"
@@ -1515,7 +1500,7 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         let manager = UserAgentManagerViewController()
         manager.onUASelected = { [weak self] item in
             guard let self = self else { return }
-            let isDesktop = item.id == "default_mac"
+            let isDesktop = item.category == .desktop || item.id == "default_mac"
             self.activeTab.webView.customUserAgent = item.uaString
             self.activeTab.webView.configuration.defaultWebpagePreferences.preferredContentMode = isDesktop ? .desktop : .mobile
             self.activeTab.reloadUserScripts()
@@ -1541,6 +1526,32 @@ final class BrowserViewController: UIViewController, UITextFieldDelegate, TabIte
         }
         let nav = UINavigationController(rootViewController: cleanVC)
         present(nav, animated: true)
+    }
+
+    private func showToastNotice(_ text: String) {
+        let toast = UILabel()
+        toast.text = "  \(text)  "
+        toast.font = .systemFont(ofSize: 13, weight: .medium)
+        toast.textColor = .white
+        toast.backgroundColor = UIColor.black.withAlphaComponent(0.75)
+        toast.layer.cornerRadius = 12
+        toast.clipsToBounds = true
+        toast.translatesAutoresizingMaskIntoConstraints = false
+        toast.alpha = 0
+
+        view.addSubview(toast)
+        NSLayoutConstraint.activate([
+            toast.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            toast.bottomAnchor.constraint(equalTo: bottomPanel.topAnchor, constant: -12),
+            toast.heightAnchor.constraint(equalToConstant: 32)
+        ])
+
+        UIView.animate(withDuration: 0.18) { toast.alpha = 1 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            UIView.animate(withDuration: 0.2, animations: { toast.alpha = 0 }) { _ in
+                toast.removeFromSuperview()
+            }
+        }
     }
 
     private func performCleanData(options: Set<CleanOption>, completion: @escaping () -> Void) {
